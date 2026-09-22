@@ -8,7 +8,9 @@ dotenv.load_dotenv()
 
 def send_verify_email(
         to_email:str,
-        code:str,):
+        code:str,
+        tag:str = "login"
+):
     with smtplib.SMTP_SSL(
         os.environ['SMTP_HOST'],
         int(os.environ['SMTP_PORT']),
@@ -16,10 +18,19 @@ def send_verify_email(
         timeout=5
     ) as smtp:
         smtp.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
-        smtp.sendmail(
-            os.environ['SMTP_USER'],
-            to_email,
-            f"""You are logining into the Training platform.
-            The verify code is {code}.
-            The limit time is 15 minutes.""",
-        )
+        if tag == "login":
+            smtp.sendmail(
+                os.environ['SMTP_USER'],
+                to_email,
+                f"""You are logining into the Training platform.
+                The verify code is {code}.
+                The limit time is 5 minutes.""",
+            )
+        elif tag == "reset":
+            smtp.sendmail(
+                os.environ['SMTP_USER'],
+                to_email,
+                f"""You are resetting the password of the Training platform.
+                The verify code is {code}.
+                The limit time is 5 minutes.""",
+            )

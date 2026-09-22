@@ -15,9 +15,9 @@ def hash_code(challenge_id:str, code:str):
 
 async def create_email_challenge(
         email:str,
-        user_name:str,
         hashed_password:str,
-        role_id:str
+        user_name:str = None,
+        role_id:str = None,
 ):
     code = f"{secrets.randbelow(100000):06d}"
 
