@@ -6,17 +6,18 @@ from data_model.core_database import get_db
 from core.security import (
     hash_password,
     verify_password,
-    create_access_token,
 )
 from data_model.data_model import User
 from data_model.data_model import Account
 from data_model.data_model import Roles
-
+import secrets
 import os
-
+import json
 from service.session import create_session, SESSION_TTL, delete_session
-from schema.auth import RegisterRequest, LoginRequest, TokenResponse
+from schema.auth import RegisterRequest, LoginRequest
 from dependencies.csrf import verify_csrf
+from tools.email_tool import send_verify_email
+from tools.email_otp import verify_email_challenge, create_email_challenge
 
 IS_PRODUCTION = os.getenv("IS_PRODUCTION")=="production"
 
@@ -25,8 +26,8 @@ router = APIRouter(
     tags=['Authentication']
 )
 
-@router.post("/register")
-def register(
+@router.post("/pre_register")
+async def pre_register(
         data: RegisterRequest,
         db: Session = Depends(get_db),
 ):
@@ -44,24 +45,46 @@ def register(
     default_role = db.scalar(
         select(Roles).where(Roles.role_name == "user")
     )
-
     if default_role is None:
         raise HTTPException(
             status_code=500,
             detail="Default role does not exist",
         )
+
+    hashed_password = hash_password(data.password)
+    challenge_id, code =await create_email_challenge(
+        email, data.user_name, hashed_password,default_role.id
+    )
+    send_verify_email(email,code)
+    return {
+        "message": "Have send the email code",
+        "challenge_id": challenge_id
+    }
+
+@router.post("/verify_register")
+async def verify_register(
+        code: str,
+        challenge_id: str,
+        db: Session = Depends(get_db)):
+    user_info = await verify_email_challenge(challenge_id, code)
+    if user_info is None:
+        raise HTTPException(
+            status_code=401,
+            detail="验证码已过期或注册信息不存在"
+        )
+
     try:
         user = User(
-            user_name=data.user_name,
+            user_name=user_info["user_name"],
         )
         db.add(user)
         db.flush()
 
         account = Account(
             user_id=user.id,
-            email=email,
-            password=hash_password(data.password),
-            role_id=default_role.id
+            email=user_info["email"],
+            password=user_info["hash_password"],
+            role_id=user_info["role_id"]
         )
         db.add(account)
         db.commit()
@@ -72,7 +95,7 @@ def register(
             status_code=409,
             detail="Account is not consistent with this email",
         )
-    return{
+    return {
         "message": "Create account successfully",
         "user_id": user.id
     }
@@ -92,7 +115,6 @@ async def login(
         )
     if not verify_password(data.password, existing_account.password):
         raise HTTPException(status_code=401, detail="Incorrect password")
-
     session_id, csrf_token = await create_session(str(existing_account.user_id))
     response.set_cookie(
         key="session_id",

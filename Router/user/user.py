@@ -25,3 +25,7 @@ async def me(
         "user_name": user_info.user_name,
         "csrf_token": csrf_token
     }
+
+@router.post("/edit_profile")
+async def edit_profile():
+    pass
