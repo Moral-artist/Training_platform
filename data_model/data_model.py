@@ -1,11 +1,8 @@
-from sqlalchemy import Integer, String, DateTime, ForeignKey, UUID, text
+from sqlalchemy import Integer, String, DateTime, ForeignKey, UUID, text, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import uuid
 from data_model.core_database import Base
 from datetime import datetime
-
-
-
 
 class User(Base):
     __tablename__ = "users"
@@ -20,6 +17,16 @@ class User(Base):
         String,
         nullable=False
     )
+
+    character: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+    __table_args__ = (
+        CheckConstraint("character IN ('engineer', 'operator', 'shiftleader')",
+                        name="character_check"),
+    )
+
 
 class Account(Base):
     __tablename__ = "accounts"

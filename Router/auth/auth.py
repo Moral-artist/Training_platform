@@ -26,7 +26,22 @@ router = APIRouter(
     tags=['Authentication']
 )
 
-@router.post("/pre_register")
+@router.post("/pre_register",
+             description="""
+             **认证要求：**
+             注册请求体格式为{
+                    user_name: str = Field(min_length=1, max_length=100)
+                    email: EmailStr
+                    password: str = Field(min_length=8, max_length=128)
+                    character: CharacterEnum | None = None
+             }
+             
+             **业务流程：**
+             前端将注册信息发送至后端，
+             后端会创建邮箱验证进程，同时将用户注册信息以一次访问的形式存储在redis，
+             会返回challenge_id作为正式注册时访问redis内注册信息的key
+             challenge_id需要存储在vue的pinia中
+             """)
 async def pre_register(
         data: RegisterRequest,
         db: Session = Depends(get_db),
@@ -53,7 +68,9 @@ async def pre_register(
 
     hashed_password = hash_password(data.password)
     challenge_id, code =await create_email_challenge(
-        email, data.user_name, hashed_password,default_role.id
+        email=email, user_name=data.user_name,
+        character=data.character,hashed_password=hashed_password,
+        role_id=default_role.id
     )
     send_verify_email(email,code)
     return {
@@ -61,7 +78,17 @@ async def pre_register(
         "challenge_id": challenge_id
     }
 
-@router.post("/verify_register")
+@router.post("/verify_register",
+             description="""
+             **认证要求：**
+             - 必须携带有效的 challenge_id。
+             - 邮箱验证码：code。
+
+             **业务流程：**
+             通过challenge_id获取redis中存储的注册信息
+             
+             """
+             )
 async def verify_register(
         code: str,
         challenge_id: str,
@@ -76,6 +103,7 @@ async def verify_register(
     try:
         user = User(
             user_name=user_info["user_name"],
+            character=user_info["character"],
         )
         db.add(user)
         db.flush()
