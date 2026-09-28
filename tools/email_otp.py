@@ -16,7 +16,7 @@ def hash_code(challenge_id:str, code:str):
 async def create_email_challenge(
         email:str,
         hashed_password:str,
-        character: str,
+        character: str = None,
         user_name:str = None,
         role_id:str = None,
 ):
