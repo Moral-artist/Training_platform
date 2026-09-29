@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from data_model.core_database import get_db
-from data_model.data_model import User
+from data_model.data_model import User, Account, Roles
 
 router = APIRouter(prefix="/user", tags=["user_info"])
 
@@ -18,7 +18,14 @@ async def me(
 ):
     user_id = session["user_id"]
 
-    user_info = db.scalar(select(User).where(User.id == user_id))
+    user_info = db.execute(
+        select(User.user_name.label("user_name"),
+               Roles.role_name.label("role"))
+        .select_from(User)
+        .join(Account, Account.user_id == User.id)
+        .join(Roles, Roles.id == Account.role_id)
+        .where(User.id == user_id)
+    ).first()
     if not user_info:
         raise HTTPException(status_code=401, detail="User not found")
 
@@ -27,6 +34,7 @@ async def me(
 
     return {
         "user_name": user_info.user_name,
+        "role": user_info.role,
         "csrf_token": csrf_token
     }
 

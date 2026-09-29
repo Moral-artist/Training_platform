@@ -6,34 +6,33 @@ from sqlalchemy.orm import Session
 from data_model.core_database import get_db
 from sqlalchemy import select, update, func
 from sqlalchemy.exc import IntegrityError
-from data_model.data_model import Systems, SystemLesson, Lessons, Account
+from data_model.data_model import Systems, SystemLesson, Lessons, Account, Roles
 from schema.lesson import LessonForm
+from tools.permission_auth import permission_auth
 router = APIRouter(prefix="/lessons", tags=["lessons"])
 
 @router.post("/systemsubmit")
 async def systemsubmit(
         system_name: str,
         db:Session= Depends(get_db),
-        session: dict = Depends(verify_csrf)
+        existing_account: dict = Depends(permission_auth)
 ):
+    if existing_account["role"] != "administer":
+        raise HTTPException(status_code=400, detail="Account is not administer")
+
     system_name = system_name.lower().strip()
     existing_systm = db.scalar(
         select(Systems)
         .where(Systems.system_name==system_name)
     )
-    existing_account = db.scalar(
-        select(Account.id)
-        .where(Account.user_id == session["user_id"])
-    )
     if existing_systm is not None:
         raise HTTPException(status_code=400, detail="System already exists")
-    if existing_account is None:
-        raise HTTPException(status_code=400, detail="Account is not exist")
+
     try:
         new_system = Systems(
             system_name=system_name,
             created_at=datetime.now(),
-            create_by=existing_account
+            create_by=existing_account["account_id"]
         )
         db.add(new_system)
         db.commit()
@@ -42,12 +41,14 @@ async def systemsubmit(
         raise HTTPException(status_code=409, detail="Updating system failed")
     return {"message": "System successfully updated"}
 
-@router.get("/{system_id}/lessonlist")
+@router.get("/majors/{system_id}/lessonlist")
 async def lessonlist(
         system_id: int,
         current_page: int = 1,
+        page_size: int = 10,
         db: Session = Depends(get_db),
 ):
+
     existing_system = db.scalar(select(Systems).where(Systems.id == system_id))
     if existing_system is None:
         raise HTTPException(status_code=404, detail="System not exist")
@@ -57,8 +58,8 @@ async def lessonlist(
             .join(SystemLesson,
                   SystemLesson.lesson_id == Lessons.id)
             .where(SystemLesson.system_id == system_id)
-            .limit(10)
-            .offset(10*(current_page-1))
+            .limit(page_size)
+            .offset(page_size*(current_page-1))
             .order_by(Lessons.id)
         ).all()
         total_lessons = db.scalar(
@@ -66,9 +67,11 @@ async def lessonlist(
             .select_from(SystemLesson)
             .where(SystemLesson.system_id == system_id)
         )
-        total_pages = math.ceil(total_lessons / 10)
+        total_pages = math.ceil(total_lessons / page_size)
+
         if not selected_lessons:
             raise HTTPException(status_code=404, detail="Lesson not exist")
+
         return {
             "total_lessons": total_lessons,
             "total_pages": total_pages,
@@ -88,12 +91,12 @@ async def lessonlist(
 async def lessonsubmit(
         lesson_data: LessonForm,
         db: Session = Depends(get_db),
-        session: dict = Depends(verify_csrf)
+        existing_account: dict = Depends(permission_auth)
 ):
-    existing_account_id = db.scalar(select(Account.id).where(Account.user_id == session["user_id"]))
+    if existing_account["role"] != "administer":
+        raise HTTPException(status_code=400, detail="Account is not administer")
+
     existing_system = db.scalar(select(Systems).where(Systems.id == lesson_data.system_id))
-    if existing_account_id is None:
-        raise HTTPException(status_code=404, detail="Account not exist")
     if existing_system is None:
         raise HTTPException(status_code=404, detail="System not exist")
     try:
@@ -103,7 +106,7 @@ async def lessonsubmit(
             lesson_video_url=lesson_data.lesson_video_url,
             created_at=datetime.now(),
             update_at=datetime.now(),
-            created_by=existing_account_id
+            created_by=existing_account["account_id"]
         )
 
         db.add(new_lesson)
@@ -120,3 +123,16 @@ async def lessonsubmit(
         raise HTTPException(status_code=400, detail="Updating lesson failed")
 
 
+@router.get("/systems")
+async def getsystems(
+        db: Session = Depends(get_db),
+):
+    systems = db.scalars(
+        select(Systems)
+    ).all()
+    if not systems:
+        raise HTTPException(status_code=404, detail="System not exist")
+    return [{
+        "system_id":system.id,
+        "system_name": system.system_name
+    } for system in systems]
