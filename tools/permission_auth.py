@@ -22,3 +22,4 @@ async def permission_auth(
         "account_id": existing_account.account_id,
         "role": existing_account.role,
     }
+

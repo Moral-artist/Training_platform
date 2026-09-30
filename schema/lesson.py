@@ -6,3 +6,8 @@ class LessonForm(BaseModel):
     lesson_name: str
     description: str
     lesson_video_url: str
+
+class UploadVideo(BaseModel):
+    filename: str
+    size: int
+    content_type: str

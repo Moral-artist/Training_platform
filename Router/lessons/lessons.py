@@ -9,6 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from data_model.data_model import Systems, SystemLesson, Lessons, Account, Roles
 from schema.lesson import LessonForm
 from tools.permission_auth import permission_auth
+from core.R2_client import R2_BUCKET,r2
+from botocore.exceptions import ClientError
+
 router = APIRouter(prefix="/lessons", tags=["lessons"])
 
 @router.post("/systemsubmit")
@@ -95,6 +98,14 @@ async def lessonsubmit(
 ):
     if existing_account["role"] != "administer":
         raise HTTPException(status_code=400, detail="Account is not administer")
+    try:
+        r2.head_object(
+            Bucket=R2_BUCKET,
+            Key=lesson_data.lesson_video_url,
+        )
+    except ClientError as e:
+        print(e.response)
+        raise HTTPException(status_code=400, detail="Video not exist")
 
     existing_system = db.scalar(select(Systems).where(Systems.id == lesson_data.system_id))
     if existing_system is None:
