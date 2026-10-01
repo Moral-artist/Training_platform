@@ -1,7 +1,9 @@
 from symtable import Class
 
 from sqlalchemy import (Integer, String, DateTime,
-                        ForeignKey, UUID, text, CheckConstraint)
+                        ForeignKey, UUID, text, CheckConstraint,
+                        UniqueConstraint, Boolean, func)
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import uuid
 from data_model.core_database import Base
@@ -29,7 +31,6 @@ class User(Base):
         CheckConstraint("character IN ('engineer', 'operator', 'shiftleader')",
                         name="character_check"),
     )
-
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -114,12 +115,12 @@ class Systems(Base):
 
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now()
     )
     create_by: Mapped[uuid.UUID] = mapped_column(
         UUID,
         ForeignKey("accounts.id", onupdate="CASCADE", ondelete="CASCADE"),
     )
-
 
 class Lessons(Base):
     __tablename__ = "lessons"
@@ -134,7 +135,8 @@ class Lessons(Base):
     )
     lesson_name: Mapped[str] = mapped_column(
         String,
-        nullable=False
+        nullable=False,
+        unique=True
     )
     lesson_video_url: Mapped[str] = mapped_column(
         String,
@@ -142,13 +144,15 @@ class Lessons(Base):
     )
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now()
     )
     update_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now()
     )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID,
-        ForeignKey("accounts.id", onupdate="CASCADE", ondelete="CASCADE"),
+        ForeignKey("accounts.id", onupdate="CASCADE", ondelete="SET NULL"),
         nullable=False,
     )
 
@@ -163,5 +167,128 @@ class SystemLesson(Base):
         Integer,
         ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
         primary_key=True
+    )
+
+class TrainingPlan(Base):
+    __tablename__ = "training_plan"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+    plan_name: Mapped[str] = mapped_column(
+        String,
+    )
+    description: Mapped[str] = mapped_column(
+        String
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID,
+        ForeignKey("accounts.id", onupdate="CASCADE", ondelete="SET NULL"),
+    )
+
+class TrainingPlanLesson(Base):
+    __tablename__ = "training_plan_lesson"
+
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("training_plan.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    lesson_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+
+    lesson_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "lesson_order",
+            name='unique_order'
+        ),
+    )
+
+class CustomedPlan(Base):
+    __tablename__ = "customed_plan"
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID,
+        ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE"),
+    )
+    template_plan_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "training_plan.id",
+            onupdate="CASCADE",
+            ondelete="SET NULL"
+        ),
+        nullable=True
+    )
+    plan_name: Mapped[str] = mapped_column(
+        String,
+    )
+    source_type: Mapped[str] = mapped_column(
+        String
+    )
+    status: Mapped[str] = mapped_column(
+        String,
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    __table_args__ = (
+        CheckConstraint("source_type IN ('preset', 'personalized', 'manual')" ),
+        CheckConstraint("status IN ('not_started', 'in_progress', 'completed', 'paused')" ),
+    )
+
+class PlanLesson(Base):
+    __tablename__ = "plan_lesson"
+    lesson_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("customed_plan.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    completed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    start_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+    lesson_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "lesson_order",
+            name='unique_plan_order'
+        ),
     )
 

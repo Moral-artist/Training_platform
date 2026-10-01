@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from data_model.core_database import get_db
-from data_model.data_model import User, Account, Roles
+from data_model.data_model import (User, Account, Roles,
+                                   CustomedPlan, PlanLesson, Lessons)
 
 router = APIRouter(prefix="/user", tags=["user_info"])
 
@@ -64,3 +65,41 @@ async def edit_profile(
     return {
         "message": "User updated successfully",
     }
+
+@router.get("/my_lessons")
+async def my_lessons(
+        session: dict = Depends(verify_csrf),
+        db: Session = Depends(get_db),
+):
+    try:
+        my_lessons = db.execute(
+            select(CustomedPlan.plan_name.label("plan_name"),
+                   Lessons.id.label("lesson_id"),
+                   Lessons.lesson_name.label("lesson_name"))
+            .select_from(CustomedPlan)
+            .join(PlanLesson, PlanLesson.plan_id==CustomedPlan.id)
+            .join(Lessons, Lessons.id==PlanLesson.lesson_id)
+            .where(CustomedPlan.user_id == session["user_id"])
+        ).all()
+
+        grouped={}
+        for my_lesson in my_lessons:
+            if my_lesson.plan_name not in grouped:
+                grouped[my_lesson.plan_name] = []
+            grouped[my_lesson.plan_name].append(
+                {
+                    "lesson_id": my_lesson.lesson_id,
+                    "lesson_name": my_lesson.lesson_name,
+                }
+            )
+        return [{
+            "plan_name": plan_name,
+            "lesson": lesson
+        } for plan_name, lesson in grouped.items()]
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Updating information failed")
+
+
+

@@ -147,3 +147,40 @@ async def getsystems(
         "system_id":system.id,
         "system_name": system.system_name
     } for system in systems]
+
+@router.get("/alllessons")
+async def getalllessons(
+        db: Session = Depends(get_db),
+):
+    try:
+        all_lessons = db.execute(
+            select(Systems.system_name.label('system_name'),
+                   Lessons.lesson_name.label('lesson_name'),
+                   Lessons.id.label('lesson_id'),)
+            .select_from(Systems)
+            .join(SystemLesson, SystemLesson.system_id == Systems.id)
+            .join(Lessons, Lessons.id == SystemLesson.lesson_id)
+        ).all()
+
+        grouped = {}
+        for item in all_lessons:
+            if item.system_name not in grouped:
+                grouped[item.system_name] = []
+
+            grouped[item.system_name].append({
+                "lesson_id": item.lesson_id,
+                "lesson_name": item.lesson_name,
+            })
+
+        return [
+            {
+                "system_name": system_name,
+                "lessons": lessons,
+            }
+            for system_name, lessons in grouped.items()
+        ]
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Cannot get all lessons")
+

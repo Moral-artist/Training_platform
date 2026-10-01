@@ -3,6 +3,7 @@ from Router.auth.auth import router as auth_router
 from Router.user.user import router as user_router
 from Router.lessons.lessons import router as lessons_router
 from Router.lessons.lesson_video import router as lesson_video
+from Router.plan.plan_action import router as plan_action
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(
     title="Training ERP",
@@ -21,6 +22,8 @@ app.include_router(user_router, prefix="/api")
 app.include_router(lessons_router, prefix="/api")
 
 app.include_router(lesson_video, prefix="/api")
+
+app.include_router(plan_action, prefix="/api")
 
 origins = [
     "http://localhost:5173",

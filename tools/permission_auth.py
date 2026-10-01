@@ -20,6 +20,7 @@ async def permission_auth(
         raise HTTPException(status_code=404, detail="Account not exist")
     return {
         "account_id": existing_account.account_id,
+        "user_id": session["user_id"],
         "role": existing_account.role,
     }
 
