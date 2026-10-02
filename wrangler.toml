@@ -1,0 +1,17 @@
+name = "training-video"
+main = "src/index.js"
+compatibility_date = "2026-10-02"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+# 使用自定义 Worker 域名后可设 true，缓存命中仍先校验 Token。
+CACHE_SEGMENTS = "false"
+
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "training-private-videos"
+
+[observability]
+enabled = false
+# 不打开记录完整 URL 的请求日志；Query 中包含短时播放 Token。
