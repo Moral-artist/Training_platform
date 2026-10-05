@@ -15,12 +15,22 @@ from core.R2_client import R2_BUCKET,r2
 from botocore.exceptions import ClientError
 
 router = APIRouter(prefix="/plan", tags=["Plan"])
+
+MEMBERSHIP_LEVEL = {
+    "free": 0,
+    "basic": 1,
+    "pro": 2,
+    "enterprise": 3,
+}
+
 @router.get("/preset_planlist")
 async def preset_planlist(
         db: Session = Depends(get_db),
 ):
     try:
         preset_plan = db.execute(select(TrainingPlan.plan_name.label('plan_name'),
+                                        TrainingPlan.id.label('plan_id'),
+                                        TrainingPlanLesson.lesson_id.label('lesson_id'),
                                         TrainingPlanLesson.lesson_order.label('order'),
                                         Lessons.lesson_name.label('lesson_name'))
                                  .select_from(TrainingPlan)
@@ -28,7 +38,9 @@ async def preset_planlist(
                                  .join(Lessons, Lessons.id==TrainingPlanLesson.lesson_id)
                                  ).all()
         return [{
+            "plan_id": item.plan_id,
             "plan_name":item.plan_name,
+            "lesson_id":item.lesson_id,
             "order":item.order,
             "lesson_name":item.lesson_name
         } for item in preset_plan]
@@ -67,12 +79,15 @@ async def create_preset_plan(
         db.rollback()
         raise HTTPException(status_code=403, detail="Create Template_plan Failed")
 
+
 @router.post("/add_template_plan")
 async def add_template_plan(
         data: AddTemplatePlan,
         db: Session = Depends(get_db),
         existing_account: dict = Depends(permission_auth),
 ):
+    if MEMBERSHIP_LEVEL[existing_account["membership_level"]]<MEMBERSHIP_LEVEL['basic']:
+        raise HTTPException(status_code=409, detail="No access")
     try:
         new_custom_plan = CustomedPlan(
             plan_name=data.plan_name,
@@ -119,6 +134,8 @@ async def add_custom_plan(
         db: Session = Depends(get_db),
         existing_account: dict = Depends(permission_auth),
 ):
+    if MEMBERSHIP_LEVEL[existing_account["membership_level"]]<MEMBERSHIP_LEVEL['pro']:
+        raise HTTPException(status_code=409, detail="No access")
     try:
         new_custom_plan = CustomedPlan(
             plan_name=data.plan_name,

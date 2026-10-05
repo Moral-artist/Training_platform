@@ -1,6 +1,4 @@
 import redis.asyncio as redis
+from data_model.config import settings
 
-redis_client = redis.from_url(
-    "redis://localhost:6380/0",
-    decode_responses=True,
-)
+redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)

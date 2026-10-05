@@ -25,10 +25,8 @@ app.include_router(lesson_video, prefix="/api")
 
 app.include_router(plan_action, prefix="/api")
 
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+from data_model.config import settings
+origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,

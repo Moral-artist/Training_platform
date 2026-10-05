@@ -68,14 +68,18 @@ async def edit_profile(
 
 @router.get("/my_lessons")
 async def my_lessons(
-        session: dict = Depends(verify_csrf),
+        session: dict = Depends(get_current_session),
         db: Session = Depends(get_db),
 ):
     try:
         my_lessons = db.execute(
             select(CustomedPlan.plan_name.label("plan_name"),
+                   CustomedPlan.id.label("plan_id"),
+                   CustomedPlan.source_type.label("source_type"),
                    Lessons.id.label("lesson_id"),
-                   Lessons.lesson_name.label("lesson_name"))
+                   PlanLesson.lesson_order.label("lesson_order"),
+                   Lessons.lesson_name.label("lesson_name"),
+                   PlanLesson.completed.label("completed"),)
             .select_from(CustomedPlan)
             .join(PlanLesson, PlanLesson.plan_id==CustomedPlan.id)
             .join(Lessons, Lessons.id==PlanLesson.lesson_id)
@@ -83,19 +87,27 @@ async def my_lessons(
         ).all()
 
         grouped={}
-        for my_lesson in my_lessons:
-            if my_lesson.plan_name not in grouped:
-                grouped[my_lesson.plan_name] = []
-            grouped[my_lesson.plan_name].append(
+        for item in my_lessons:
+            key = (
+                item.plan_id,
+                item.plan_name,
+                item.source_type
+            )
+            if key not in grouped:
+                grouped[key] = []
+            grouped[key].append(
                 {
-                    "lesson_id": my_lesson.lesson_id,
-                    "lesson_name": my_lesson.lesson_name,
+                    "lesson_id": item.lesson_id,
+                    "lesson_name": item.lesson_name,
+                    "lesson_order": item.lesson_order,
+                    "completed": item.completed,
                 }
             )
         return [{
-            "plan_name": plan_name,
-            "lesson": lesson
-        } for plan_name, lesson in grouped.items()]
+            "plan_name": plan_info[1],
+            "source_type": plan_info[2],
+            "lessons": lesson
+        } for plan_info, lesson in grouped.items()]
 
     except IntegrityError:
         db.rollback()

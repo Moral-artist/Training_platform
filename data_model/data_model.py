@@ -2,7 +2,7 @@ from symtable import Class
 
 from sqlalchemy import (Integer, String, DateTime,
                         ForeignKey, UUID, text, CheckConstraint,
-                        UniqueConstraint, Boolean, func)
+                        UniqueConstraint, Boolean, func, Text, BigInteger, Float)
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import uuid
@@ -49,7 +49,9 @@ class Account(Base):
         nullable=False,
         unique=True
     )
-    token: Mapped[str] = mapped_column(
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+    token: Mapped[str | None] = mapped_column(
         String,
     )
     expired: Mapped[datetime | None] = mapped_column(
@@ -57,11 +59,19 @@ class Account(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID,
-        ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE")
+        ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE"),
+        unique=True,
     )
     role_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("roles.id", onupdate="CASCADE", ondelete="CASCADE")
+    )
+    membership_level: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+    __table_args__ = (
+        CheckConstraint("membership_level IN ('free','basic','pro')"),
     )
 
 class Roles(Base):
@@ -122,6 +132,28 @@ class Systems(Base):
         ForeignKey("accounts.id", onupdate="CASCADE", ondelete="CASCADE"),
     )
 
+class LessonAccess(Base):
+    __tablename__ = "lesson_access"
+
+    # 修改1001
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID,
+        ForeignKey("accounts.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    lesson_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID,
+        ForeignKey("accounts.id", onupdate="CASCADE", ondelete="SET NULL"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
 class Lessons(Base):
     __tablename__ = "lessons"
     id: Mapped[int] = mapped_column(
@@ -138,9 +170,10 @@ class Lessons(Base):
         nullable=False,
         unique=True
     )
-    lesson_video_url: Mapped[str] = mapped_column(
-        String,
-        nullable=False
+    # 旧数据迁移期间保留，新的课程不再写播放 URL。
+    lesson_video_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    video_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID, ForeignKey("video_assets.id", ondelete="RESTRICT"), index=True
     )
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -150,11 +183,86 @@ class Lessons(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
-    created_by: Mapped[uuid.UUID] = mapped_column(
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID,
         ForeignKey("accounts.id", onupdate="CASCADE", ondelete="SET NULL"),
-        nullable=False,
+        nullable=True,
     )
+
+
+class VideoAsset(Base):
+    __tablename__ = "video_assets"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            "'pending_upload', 'uploaded', 'processing', "
+            "'ready', 'failed', 'migration_pending'"
+            ")",
+            name="ck_video_assets_status",
+        ),
+        CheckConstraint(
+            "status <> 'ready' OR master_playlist_key IS NOT NULL",
+            name="ck_video_assets_ready_manifest",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID,
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+
+    declared_size: Mapped[int | None] = mapped_column(BigInteger)
+    content_type: Mapped[str | None] = mapped_column(String(64))
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+    # 原始视频在 R2 中的路径
+    source_object_key: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        unique=True,
+    )
+
+    # 转码完成后的 master.m3u8 路径
+    master_playlist_key: Mapped[str | None] = mapped_column(Text)
+
+    # 可选：封面图片在 R2 中的路径
+    poster_object_key: Mapped[str | None] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'pending_upload'"),
+    )
+
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID,
+        ForeignKey(
+            "accounts.id",
+            onupdate="CASCADE",
+            ondelete="SET NULL",
+        ),
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=func.now(),
+    )
+
+
 
 class SystemLesson(Base):
     __tablename__ = "system_lesson"

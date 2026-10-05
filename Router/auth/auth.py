@@ -141,6 +141,8 @@ async def login(
             status_code=400,
             detail="Account has not been created",
         )
+    if not existing_account.is_active:
+        raise HTTPException(status_code=403, detail="Account disabled")
     if not verify_password(data.password, existing_account.password):
         raise HTTPException(status_code=401, detail="Incorrect password")
     session_id, csrf_token = await create_session(str(existing_account.user_id))
