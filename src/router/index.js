@@ -13,6 +13,8 @@ import Root from '../views/Root.vue'
 import SystemCreate from '../views/SystemCreate.vue'
 import LessonCreate from '../views/LessonCreate.vue'
 import LessonAccessManage from '../views/LessonAccessManage.vue'
+import CreatePlan from '../views/CreatePlan.vue'
+import Mylesson from '../views/Mylesson.vue'
 
 const routes = [
   { path: '/lessons/accessmanage', name: 'LessonAccessManage', component: LessonAccessManage },
@@ -81,6 +83,18 @@ const routes = [
     path:'/lessons/lessoncreate',
     name:'lessoncreate',
     component: LessonCreate,
+    meta: { requiresAuth: true }
+  },
+  {
+    path:'/plan/plancreate',
+    name:'plancreate',
+    component: CreatePlan,
+    meta: { requiresAuth: true }
+  },
+  {
+    path:'/user_info/mylessons',
+    name:'Mylessons',
+    component: Mylesson,
     meta: { requiresAuth: true }
   }
 ]

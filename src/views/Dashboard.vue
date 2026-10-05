@@ -68,10 +68,18 @@
         <RouterLink v-if="user.role === 'administer'" class="sub-item" to="/lessons/accessmanage">课程授权</RouterLink>
 
         <div class="menu-title">
+          课程广场
+        </div>
+
+        <div class="sub-item" @click="goLessonCount">
+          搭建课程
+        </div>
+
+        <div class="menu-title">
           我的课程
         </div>
 
-        <div class="sub-item">
+        <div class="sub-item" @click="goMyLesson">
           在学课程
         </div>
 
@@ -416,6 +424,14 @@ const goSystemCreate = ()=>{
 
 const goLessonCreate=()=>{
   router.push('/lessons/lessoncreate')
+}
+
+const goLessonCount=()=>{
+  router.push('/plan/plancreate')
+}
+
+const goMyLesson=()=>{
+  router.push('/user_info/mylessons')
 }
 
 const user = ref({
