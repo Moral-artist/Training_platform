@@ -5,6 +5,7 @@ from Router.lessons.lessons import router as lessons_router
 from Router.lessons.lesson_video import router as lesson_video
 from Router.plan.plan_action import router as plan_action
 from fastapi.middleware.cors import CORSMiddleware
+from Router.Exams.exams import router as exams_router
 app = FastAPI(
     title="Training ERP",
     description="企业培训考试管理系统",
@@ -24,6 +25,8 @@ app.include_router(lessons_router, prefix="/api")
 app.include_router(lesson_video, prefix="/api")
 
 app.include_router(plan_action, prefix="/api")
+
+app.include_router(exams_router, prefix="/api")
 
 from data_model.config import settings
 origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]

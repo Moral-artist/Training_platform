@@ -263,7 +263,6 @@ class VideoAsset(Base):
     )
 
 
-
 class SystemLesson(Base):
     __tablename__ = "system_lesson"
     system_id: Mapped[int] = mapped_column(
@@ -400,3 +399,149 @@ class PlanLesson(Base):
         ),
     )
 
+class Exams(Base):
+    __tablename__ = "exams"
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+    exam_name: Mapped[str] = mapped_column(
+        String,
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+class Questions(Base):
+    __tablename__ = "questions"
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+    question_name: Mapped[str] = mapped_column(
+        String,
+    )
+    question_type: Mapped[str] = mapped_column(
+        String,
+    )
+    answer: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+class Options(Base):
+    __tablename__ = "options"
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+    q_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
+        nullable=False
+    )
+    option_key: Mapped[str] = mapped_column(
+        String,
+    )
+    option: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+
+class ExamQuestion(Base):
+    __tablename__ = "exam_question"
+    exam_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+
+class AttemptAnswers(Base):
+    __tablename__ = "attempt_answers"
+    attempt_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exam_attempts.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    answer: Mapped[str] = mapped_column(
+        String,
+    )
+    score: Mapped[float] = mapped_column(
+        Float,
+    )
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+    )
+
+class ExamAttempts(Base):
+    __tablename__ = "exam_attempts"
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+    exam_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
+        nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID,
+        ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE"),
+        nullable=False
+    )
+    start_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    submit_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    score: Mapped[float] = mapped_column(
+        Float,
+    )
+    passed: Mapped[bool] = mapped_column(
+        Boolean,
+    )
+    attempt_no: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "exam_id",
+            "user_id",
+            "attempt_no",
+        ),
+    )
+
+class LessonExam(Base):
+    __tablename__ = "lesson_exam"
+    lesson_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
+    exam_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True
+    )
