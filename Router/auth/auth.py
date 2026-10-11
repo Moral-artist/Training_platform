@@ -1,4 +1,7 @@
-from fastapi import HTTPException, APIRouter, Depends, Response, Cookie
+from fastapi import HTTPException, APIRouter, Depends, Response, Cookie, Request
+from starlette.concurrency import run_in_threadpool
+from service.video_limits import rate_limit
+import hashlib
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -19,15 +22,16 @@ from dependencies.csrf import verify_csrf
 from tools.email_tool import send_verify_email
 from tools.email_otp import verify_email_challenge, create_email_challenge
 
-IS_PRODUCTION = os.getenv("IS_PRODUCTION")=="production"
+from data_model.config import settings
 
-router = APIRouter(
-    prefix="/auth",
-    tags=['Authentication']
-)
+IS_PRODUCTION = settings.IS_PRODUCTION == "production"
 
-@router.post("/pre_register",
-             description="""
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+@router.post(
+    "/pre_register",
+    description="""
              **认证要求：**
              注册请求体格式为{
                     user_name: str = Field(min_length=1, max_length=100)
@@ -41,15 +45,20 @@ router = APIRouter(
              后端会创建邮箱验证进程，同时将用户注册信息以一次访问的形式存储在redis，
              会返回challenge_id作为正式注册时访问redis内注册信息的key
              challenge_id需要存储在vue的pinia中
-             """)
+             """,
+)
 async def pre_register(
-        data: RegisterRequest,
-        db: Session = Depends(get_db),
+    data: RegisterRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
     email = str(data.email).lower()
-    existing_account = db.scalar(
-        select(Account).where(Account.email == email)
-    )
+    # 按客户端地址和邮箱摘要限流；不在限流键中存储明文邮箱。
+    identity = hashlib.sha256(
+        f"{request.client.host if request.client else 'unknown'}:{email}".encode()
+    ).hexdigest()
+    await rate_limit(identity, "auth", 20, 600)
+    existing_account = db.scalar(select(Account).where(Account.email == email))
 
     if existing_account:
         raise HTTPException(
@@ -57,9 +66,7 @@ async def pre_register(
             detail="Account with this email already exists",
         )
 
-    default_role = db.scalar(
-        select(Roles).where(Roles.role_name == "user")
-    )
+    default_role = db.scalar(select(Roles).where(Roles.role_name == "user"))
     if default_role is None:
         raise HTTPException(
             status_code=500,
@@ -67,19 +74,20 @@ async def pre_register(
         )
 
     hashed_password = hash_password(data.password)
-    challenge_id, code =await create_email_challenge(
-        email=email, user_name=data.user_name,
-        character=data.character,hashed_password=hashed_password,
-        role_id=default_role.id
+    challenge_id, code = await create_email_challenge(
+        email=email,
+        user_name=data.user_name,
+        character=data.character,
+        hashed_password=hashed_password,
+        role_id=default_role.id,
     )
-    send_verify_email(email,code)
-    return {
-        "message": "Have send the email code",
-        "challenge_id": challenge_id
-    }
+    await run_in_threadpool(send_verify_email, email, code)
+    return {"message": "Have send the email code", "challenge_id": challenge_id}
 
-@router.post("/verify_register",
-             description="""
+
+@router.post(
+    "/verify_register",
+    description="""
              **认证要求：**
              - 必须携带有效的 challenge_id。
              - 邮箱验证码：code。
@@ -87,18 +95,12 @@ async def pre_register(
              **业务流程：**
              通过challenge_id获取redis中存储的注册信息
              
-             """
-             )
-async def verify_register(
-        code: str,
-        challenge_id: str,
-        db: Session = Depends(get_db)):
+             """,
+)
+async def verify_register(code: str, challenge_id: str, db: Session = Depends(get_db)):
     user_info = await verify_email_challenge(challenge_id, code)
     if user_info is None:
-        raise HTTPException(
-            status_code=401,
-            detail="验证码已过期或注册信息不存在"
-        )
+        raise HTTPException(status_code=401, detail="验证码已过期或注册信息不存在")
 
     try:
         user = User(
@@ -112,7 +114,7 @@ async def verify_register(
             user_id=user.id,
             email=user_info["email"],
             password=user_info["hash_password"],
-            role_id=user_info["role_id"]
+            role_id=user_info["role_id"],
         )
         db.add(account)
         db.commit()
@@ -123,18 +125,22 @@ async def verify_register(
             status_code=409,
             detail="Account is not consistent with this email",
         )
-    return {
-        "message": "Create account successfully",
-        "user_id": user.id
-    }
+    return {"message": "Create account successfully", "user_id": user.id}
+
 
 @router.post("/login")
 async def login(
-        data: LoginRequest,
-        response: Response,
-        db: Session = Depends(get_db),
+    data: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
 ):
     email = str(data.email).lower()
+    # 按客户端地址和邮箱摘要限流；不在限流键中存储明文邮箱。
+    identity = hashlib.sha256(
+        f"{request.client.host if request.client else 'unknown'}:{email}".encode()
+    ).hexdigest()
+    await rate_limit(identity, "auth", 20, 600)
     existing_account = db.scalar(select(Account).where(Account.email == email))
     if existing_account is None:
         raise HTTPException(
@@ -145,20 +151,23 @@ async def login(
         raise HTTPException(status_code=403, detail="Account disabled")
     if not verify_password(data.password, existing_account.password):
         raise HTTPException(status_code=401, detail="Incorrect password")
-    session_id, csrf_token = await create_session(str(existing_account.user_id))
+    session_id, csrf_token = await create_session(
+        str(existing_account.user_id), existing_account.auth_version
+    )
     response.set_cookie(
         key="session_id",
         value=session_id,
         httponly=True,
-        secure = IS_PRODUCTION,
-        samesite = "lax",
-        max_age= SESSION_TTL,
-        path="/"
+        secure=IS_PRODUCTION,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        max_age=SESSION_TTL,
+        path="/",
     )
     return {
         "message": "login success",
         "csrf_token": csrf_token,
     }
+
 
 @router.post("/logout")
 async def logout(
@@ -171,20 +180,27 @@ async def logout(
     response.delete_cookie(
         key="session_id",
         httponly=True,
-        secure = IS_PRODUCTION,
-        path='/',
-        samesite='lax'
+        secure=IS_PRODUCTION,
+        path="/",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
     )
     return {
         "message": "logout success",
     }
 
+
 @router.post("/pre_reset")
 async def pre_reset(
-        data:ResetPasswordRequest,
-        db: Session = Depends(get_db),
+    data: ResetPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
     email = str(data.email).lower()
+    # 按客户端地址和邮箱摘要限流；不在限流键中存储明文邮箱。
+    identity = hashlib.sha256(
+        f"{request.client.host if request.client else 'unknown'}:{email}".encode()
+    ).hexdigest()
+    await rate_limit(identity, "auth", 20, 600)
     existing_account = db.scalar(select(Account).where(Account.email == email))
     if existing_account is None:
         raise HTTPException(
@@ -192,32 +208,32 @@ async def pre_reset(
             detail="Account does not exist",
         )
     hashed_password = hash_password(data.new_password)
-    challenge_id, code = await create_email_challenge(email=email, hashed_password=hashed_password)
-    send_verify_email(email,code)
-    return {
-        "message": "Have send the email code",
-        "challenge_id": challenge_id
-    }
+    challenge_id, code = await create_email_challenge(
+        email=email, hashed_password=hashed_password
+    )
+    await run_in_threadpool(send_verify_email, email, code, "reset")
+    return {"message": "Have send the email code", "challenge_id": challenge_id}
+
 
 @router.post("/verify_reset")
 async def verify_reset(
-        code: str,
-        challenge_id: str,
-        response: Response,
-        db: Session = Depends(get_db),
-        session_id: str | None = Cookie(default=None)
+    code: str,
+    challenge_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    session_id: str | None = Cookie(default=None),
 ):
-    reset_info = await verify_email_challenge(challenge_id, code)
+    reset_info = await verify_email_challenge(challenge_id, code, "reset")
     if reset_info is None:
-        raise HTTPException(
-            status_code=401,
-            detail="验证码已过期或注册信息不存在"
-        )
+        raise HTTPException(status_code=401, detail="验证码已过期或注册信息不存在")
     try:
         db.execute(
             update(Account)
-            .where(Account.email==reset_info["email"])
-            .values(password=reset_info["hash_password"])
+            .where(Account.email == reset_info["email"])
+            .values(
+                password=reset_info["hash_password"],
+                auth_version=Account.auth_version + 1,
+            )
         )
         db.commit()
     except IntegrityError:
@@ -229,14 +245,7 @@ async def verify_reset(
     if session_id is not None:
         await delete_session(session_id)
 
-    response.delete_cookie(
-        key="session_id",
-        path="/"
-    )
+    response.delete_cookie(key="session_id", path="/")
     return {
         "message": "Have reset the password",
     }
-
-
-
-

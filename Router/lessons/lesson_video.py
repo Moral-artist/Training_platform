@@ -14,7 +14,6 @@ from schema.lesson import UploadVideo
 from service.video_limits import rate_limit
 from tools.permission_auth import permission_auth, permission_read_auth
 
-
 router = APIRouter(prefix="/lessons_video", tags=["LessonsVideo"])
 
 # 300 MiB
@@ -36,7 +35,11 @@ def get_owned_asset(
     account: dict,
     lock: bool = False,
 ) -> VideoAsset:
-    asset = db.scalar(select(VideoAsset).where(VideoAsset.id == asset_id).with_for_update()) if lock else db.get(VideoAsset, asset_id)
+    asset = (
+        db.scalar(select(VideoAsset).where(VideoAsset.id == asset_id).with_for_update())
+        if lock
+        else db.get(VideoAsset, asset_id)
+    )
     if asset is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
@@ -150,13 +153,21 @@ def video_status(
     return {
         "asset_id": str(asset.id),
         "status": asset.status,
-        "error_message": "Video processing failed; contact administrator" if asset.status == "failed" else None,
+        "error_message": (
+            "Video processing failed; contact administrator"
+            if asset.status == "failed"
+            else None
+        ),
         "duration_seconds": asset.duration_seconds,
     }
 
 
 @router.post("/{asset_id}/retry")
-def retry_transcode(asset_id: UUID, db: Session = Depends(get_db), account: dict = Depends(permission_auth)):
+def retry_transcode(
+    asset_id: UUID,
+    db: Session = Depends(get_db),
+    account: dict = Depends(permission_auth),
+):
     require_video_manager(account)
     asset = get_owned_asset(asset_id, db, account, lock=True)
     if asset.status != "failed":

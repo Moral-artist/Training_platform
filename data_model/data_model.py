@@ -1,36 +1,43 @@
 from symtable import Class
-
-from sqlalchemy import (Integer, String, DateTime,
-                        ForeignKey, UUID, text, CheckConstraint,
-                        UniqueConstraint, Boolean, func, Text, BigInteger, Float)
+from sqlalchemy import (
+    Integer,
+    String,
+    DateTime,
+    ForeignKey,
+    UUID,
+    text,
+    CheckConstraint,
+    UniqueConstraint,
+    Boolean,
+    func,
+    Text,
+    BigInteger,
+    Float,
+)
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import uuid
 from data_model.core_database import Base
 from datetime import datetime
 
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID,
-        primary_key=True,
-        server_default=text("gen_random_uuid()")
+        UUID, primary_key=True, server_default=text("gen_random_uuid()")
     )
 
-    user_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False
-    )
+    user_name: Mapped[str] = mapped_column(String, nullable=False)
 
-    character: Mapped[str] = mapped_column(
-        String,
-        nullable=False
-    )
+    character: Mapped[str] = mapped_column(String, nullable=False)
     __table_args__ = (
-        CheckConstraint("character IN ('engineer', 'operator', 'shiftleader')",
-                        name="character_check"),
+        CheckConstraint(
+            "character IN ('engineer', 'operator', 'shiftleader')",
+            name="character_check",
+        ),
     )
+
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -40,16 +47,11 @@ class Account(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    password: Mapped[str] = mapped_column(
-        String,
-        nullable=False
+    password: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
     )
-    email: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-        unique=True
-    )
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
     token: Mapped[str | None] = mapped_column(
         String,
@@ -63,51 +65,43 @@ class Account(Base):
         unique=True,
     )
     role_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("roles.id", onupdate="CASCADE", ondelete="CASCADE")
+        String, ForeignKey("roles.id", onupdate="CASCADE", ondelete="CASCADE")
+    )
+    auth_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
     )
     membership_level: Mapped[str] = mapped_column(
         String,
-        nullable=False
+        nullable=False,
+        default='free'
     )
-    __table_args__ = (
-        CheckConstraint("membership_level IN ('free','basic','pro')"),
-    )
+
 
 class Roles(Base):
     __tablename__ = "roles"
-    id: Mapped[str] = mapped_column(
-        String,
-        primary_key=True
-    )
-    role_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False
-    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    role_name: Mapped[str] = mapped_column(String, nullable=False)
+
 
 class Permissions(Base):
     __tablename__ = "permissions"
-    id: Mapped[str] = mapped_column(
-        String,
-        primary_key=True
-    )
-    permission_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False
-    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    permission_name: Mapped[str] = mapped_column(String, nullable=False)
+
 
 class RolePermission(Base):
     __tablename__ = "role_permission"
     role_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("roles.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     permission_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("permissions.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
+
 
 class Systems(Base):
     __tablename__ = "systems"
@@ -117,20 +111,16 @@ class Systems(Base):
         autoincrement=True,
     )
 
-    system_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-        unique=True
-    )
+    system_name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
 
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     create_by: Mapped[uuid.UUID] = mapped_column(
         UUID,
         ForeignKey("accounts.id", onupdate="CASCADE", ondelete="CASCADE"),
     )
+
 
 class LessonAccess(Base):
     __tablename__ = "lesson_access"
@@ -154,6 +144,7 @@ class LessonAccess(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
+
 class Lessons(Base):
     __tablename__ = "lessons"
     id: Mapped[int] = mapped_column(
@@ -161,27 +152,24 @@ class Lessons(Base):
         primary_key=True,
         autoincrement=True,
     )
-    description: Mapped[str] = mapped_column(
-        String,
-        nullable=False
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    lesson_name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # 删除课程采用软删除，保留考试/计划历史；并发编辑采用版本号。
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
     )
-    lesson_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-        unique=True
-    )
+    request_id: Mapped[uuid.UUID | None] = mapped_column(UUID, unique=True)
     # 旧数据迁移期间保留，新的课程不再写播放 URL。
     lesson_video_url: Mapped[str | None] = mapped_column(String, nullable=True)
     video_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID, ForeignKey("video_assets.id", ondelete="RESTRICT"), index=True
     )
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     update_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID,
@@ -205,6 +193,7 @@ class VideoAsset(Base):
             "status <> 'ready' OR master_playlist_key IS NOT NULL",
             name="ck_video_assets_ready_manifest",
         ),
+        UniqueConstraint("created_by", "content_hash", name="uq_video_owner_hash"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -213,11 +202,20 @@ class VideoAsset(Base):
         server_default=text("gen_random_uuid()"),
     )
 
+    # SHA256 按上传者隔离，既可复用资产，又不会向其他账号泄露视频是否存在。
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    verified_hash: Mapped[str | None] = mapped_column(String(64))
+    multipart_upload_id: Mapped[str | None] = mapped_column(Text)
+    upload_part_size: Mapped[int | None] = mapped_column(Integer)
     declared_size: Mapped[int | None] = mapped_column(BigInteger)
     content_type: Mapped[str | None] = mapped_column(String(64))
     duration_seconds: Mapped[float | None] = mapped_column(Float)
-    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
 
     # 原始视频在 R2 中的路径
     source_object_key: Mapped[str] = mapped_column(
@@ -228,9 +226,6 @@ class VideoAsset(Base):
 
     # 转码完成后的 master.m3u8 路径
     master_playlist_key: Mapped[str | None] = mapped_column(Text)
-
-    # 可选：封面图片在 R2 中的路径
-    poster_object_key: Mapped[str | None] = mapped_column(Text)
 
     status: Mapped[str] = mapped_column(
         String(32),
@@ -267,14 +262,15 @@ class SystemLesson(Base):
     __tablename__ = "system_lesson"
     system_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("systems.id",onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        ForeignKey("systems.id", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True,
     )
     lesson_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
+
 
 class TrainingPlan(Base):
     __tablename__ = "training_plan"
@@ -287,17 +283,15 @@ class TrainingPlan(Base):
     plan_name: Mapped[str] = mapped_column(
         String,
     )
-    description: Mapped[str] = mapped_column(
-        String
-    )
+    description: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID,
         ForeignKey("accounts.id", onupdate="CASCADE", ondelete="SET NULL"),
     )
+
 
 class TrainingPlanLesson(Base):
     __tablename__ = "training_plan_lesson"
@@ -305,25 +299,17 @@ class TrainingPlanLesson(Base):
     plan_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("training_plan.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     lesson_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
 
-    lesson_order: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False
-    )
-    __table_args__ = (
-        UniqueConstraint(
-            "plan_id",
-            "lesson_order",
-            name='unique_order'
-        ),
-    )
+    lesson_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint("plan_id", "lesson_order", name="unique_order"),)
+
 
 class CustomedPlan(Base):
     __tablename__ = "customed_plan"
@@ -338,51 +324,45 @@ class CustomedPlan(Base):
     )
     template_plan_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey(
-            "training_plan.id",
-            onupdate="CASCADE",
-            ondelete="SET NULL"
-        ),
-        nullable=True
+        ForeignKey("training_plan.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
     )
     plan_name: Mapped[str] = mapped_column(
         String,
     )
-    source_type: Mapped[str] = mapped_column(
-        String
-    )
+    source_type: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(
         String,
     )
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     __table_args__ = (
-        CheckConstraint("source_type IN ('preset', 'personalized', 'manual')" ),
-        CheckConstraint("status IN ('not_started', 'in_progress', 'completed', 'paused')" ),
+        CheckConstraint("source_type IN ('preset', 'personalized', 'manual')"),
+        CheckConstraint(
+            "status IN ('not_started', 'in_progress', 'completed', 'paused')"
+        ),
     )
+
 
 class PlanLesson(Base):
     __tablename__ = "plan_lesson"
     lesson_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     plan_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("customed_plan.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     completed: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
     )
     start_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     lesson_order: Mapped[int] = mapped_column(
         Integer,
@@ -392,94 +372,77 @@ class PlanLesson(Base):
         DateTime(timezone=True),
     )
     __table_args__ = (
-        UniqueConstraint(
-            "plan_id",
-            "lesson_order",
-            name='unique_plan_order'
-        ),
+        UniqueConstraint("plan_id", "lesson_order", name="unique_plan_order"),
     )
+
 
 class Exams(Base):
     __tablename__ = "exams"
-    id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     exam_name: Mapped[str] = mapped_column(
         String,
     )
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
+
 
 class Questions(Base):
     __tablename__ = "questions"
-    id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     question_name: Mapped[str] = mapped_column(
         String,
     )
     question_type: Mapped[str] = mapped_column(
         String,
     )
-    answer: Mapped[str | None] = mapped_column(
-        String,
-        nullable=True
-    )
+    answer: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 class Options(Base):
     __tablename__ = "options"
-    id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     q_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
     )
     option_key: Mapped[str] = mapped_column(
         String,
     )
-    option: Mapped[str] = mapped_column(
-        String,
-        nullable=False
-    )
+    option: Mapped[str] = mapped_column(String, nullable=False)
     is_correct: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
     )
+
 
 class ExamQuestion(Base):
     __tablename__ = "exam_question"
     exam_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     question_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
+
 
 class AttemptAnswers(Base):
     __tablename__ = "attempt_answers"
     attempt_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("exam_attempts.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     question_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("questions.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     answer: Mapped[str] = mapped_column(
         String,
@@ -491,57 +454,64 @@ class AttemptAnswers(Base):
         Boolean,
     )
 
+
 class ExamAttempts(Base):
     __tablename__ = "exam_attempts"
-    id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-        autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     exam_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
     )
     start_time: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     submit_time: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
-    score: Mapped[float] = mapped_column(
-        Float,
-    )
+    score: Mapped[float] = mapped_column(Float, default=0, server_default=text("0"))
     passed: Mapped[bool] = mapped_column(
-        Boolean,
+        Boolean, default=False, server_default=text("false")
     )
     attempt_no: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
     )
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("customed_plan.id", onupdate="CASCADE", ondelete="CASCADE"),
+        nullable=False,
+    )
+    lesson_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
+        nullable=False
+    )
     __table_args__ = (
         UniqueConstraint(
             "exam_id",
             "user_id",
+            "lesson_id",
+            "plan_id",
             "attempt_no",
         ),
     )
+
 
 class LessonExam(Base):
     __tablename__ = "lesson_exam"
     lesson_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("lessons.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )
     exam_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("exams.id", onupdate="CASCADE", ondelete="CASCADE"),
-        primary_key=True
+        primary_key=True,
     )

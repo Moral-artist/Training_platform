@@ -1,166 +1,306 @@
-import math
-from datetime import datetime
-from dependencies.csrf import verify_csrf
-from fastapi import FastAPI, Depends, HTTPException, Response, APIRouter
+"""学习计划与课程授权分离；计划只能选已授权课程，不会自动授予权限。"""
+
+from uuid import UUID
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 from data_model.core_database import get_db
-from sqlalchemy import select, update, func
-from sqlalchemy.exc import IntegrityError
-from data_model.data_model import (Systems, SystemLesson, Lessons,
-                                   Account, Roles, PlanLesson, CustomedPlan,
-                                   TrainingPlanLesson, TrainingPlan)
-from schema.lesson import TemplatePlan, AddTemplatePlan, AddCustomPlan
-from tools.permission_auth import permission_auth
-from core.R2_client import R2_BUCKET,r2
-from botocore.exceptions import ClientError
+from data_model.data_model import (
+    TrainingPlan,
+    TrainingPlanLesson,
+    CustomedPlan,
+    PlanLesson,
+    Lessons,
+    LessonAccess
+)
+from schema.lesson import TemplatePlan, AddTemplatePlan, AddCustomPlan, LessonItem
+from tools.permission_auth import permission_auth, permission_read_auth
+from service.lesson_access import require_lesson_access
+
+MEMBERSHIP_LEVEL = {
+    "free":0,
+    "basic":1,
+    "pro":2,
+}
 
 router = APIRouter(prefix="/plan", tags=["Plan"])
 
-MEMBERSHIP_LEVEL = {
-    "free": 0,
-    "basic": 1,
-    "pro": 2,
-    "enterprise": 3,
-}
+
+def validate_items(db, account, items):
+    if (
+        not items
+        or len({i.lesson_id for i in items}) != len(items)
+        or len({i.order for i in items}) != len(items)
+        or any(i.order < 1 for i in items)
+    ):
+        raise HTTPException(
+            422, "Plan needs distinct lessons and positive distinct orders"
+        )
+    for item in items:
+        require_lesson_access(db, account, item.lesson_id)
+
+
+def save(db):
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Plan data conflict")
+
 
 @router.get("/preset_planlist")
-async def preset_planlist(
-        db: Session = Depends(get_db),
-):
-    try:
-        preset_plan = db.execute(select(TrainingPlan.plan_name.label('plan_name'),
-                                        TrainingPlan.id.label('plan_id'),
-                                        TrainingPlanLesson.lesson_id.label('lesson_id'),
-                                        TrainingPlanLesson.lesson_order.label('order'),
-                                        Lessons.lesson_name.label('lesson_name'))
-                                 .select_from(TrainingPlan)
-                                 .join(TrainingPlanLesson, TrainingPlanLesson.plan_id==TrainingPlan.id)
-                                 .join(Lessons, Lessons.id==TrainingPlanLesson.lesson_id)
-                                 ).all()
-        return [{
-            "plan_id": item.plan_id,
-            "plan_name":item.plan_name,
-            "lesson_id":item.lesson_id,
-            "order":item.order,
-            "lesson_name":item.lesson_name
-        } for item in preset_plan]
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def templates(db: Session = Depends(get_db), account=Depends(permission_read_auth)):
+    result = []
+    for plan in db.scalars(select(TrainingPlan).order_by(TrainingPlan.id)):
+        rows = db.execute(
+            select(TrainingPlanLesson, Lessons.lesson_name, Lessons.deleted_at)
+            .join(Lessons, Lessons.id == TrainingPlanLesson.lesson_id)
+            .where(TrainingPlanLesson.plan_id == plan.id)
+            .order_by(TrainingPlanLesson.lesson_order)
+        ).all()
+        result.append(
+            {
+                "plan_id": plan.id,
+                "plan_name": plan.plan_name,
+                "description": plan.description,
+                "lessons": [
+                    {
+                        "lesson_id": row.lesson_id,
+                        "order": row.lesson_order,
+                        "lesson_name": name,
+                        "archived": deleted is not None,
+                    }
+                    for row, name, deleted in rows
+                ],
+            }
+        )
+    return result
 
 
 @router.post("/create_preset_plan")
-async def create_preset_plan(
-        data:TemplatePlan,
-        db: Session = Depends(get_db),
-        existing_account: dict = Depends(permission_auth),
+def create_template(
+    data: TemplatePlan, db: Session = Depends(get_db), account=Depends(permission_auth)
 ):
-    if existing_account["role"] not in ["administer", "manager"]:
-        raise HTTPException(status_code=400, detail="Unauthorized")
-    try:
-        new_template_plan = TrainingPlan(
-            plan_name=data.plan_name,
-            description=data.description,
-            created_by=existing_account["account_id"]
-        )
-        db.add(new_template_plan)
-        db.flush()
-        for lesson_item in data.lesson_list:
-            new_training_plan_lesson = TrainingPlanLesson(
-                plan_id=new_template_plan.id,
-                lesson_id=lesson_item.lesson_id,
-                lesson_order=lesson_item.order,
+    if account["role"] not in {"administer", "manager"}:
+        raise HTTPException(403, "Manager required")
+    validate_items(db, account, data.lesson_list)
+    plan = TrainingPlan(
+        plan_name=data.plan_name,
+        description=data.description,
+        created_by=account["account_id"],
+    )
+    db.add(plan)
+    db.flush()
+    for item in data.lesson_list:
+        db.add(
+            TrainingPlanLesson(
+                plan_id=plan.id, lesson_id=item.lesson_id, lesson_order=item.order
             )
-            db.add(new_training_plan_lesson)
-        db.commit()
-        return {
-            "message":"Create Template_plan successfully",
-        }
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=403, detail="Create Template_plan Failed")
+        )
+    save(db)
+    return {"plan_id": plan.id}
 
 
 @router.post("/add_template_plan")
-async def add_template_plan(
-        data: AddTemplatePlan,
-        db: Session = Depends(get_db),
-        existing_account: dict = Depends(permission_auth),
+def add_template(
+    data: AddTemplatePlan,
+    db: Session = Depends(get_db),
+    account=Depends(permission_auth),
 ):
-    if MEMBERSHIP_LEVEL[existing_account["membership_level"]]<MEMBERSHIP_LEVEL['basic']:
-        raise HTTPException(status_code=409, detail="No access")
+    if MEMBERSHIP_LEVEL[account['membership_level']]<MEMBERSHIP_LEVEL['basic']:
+        raise HTTPException(409, "You dont have access, You need to upgrade to Basic")
+    if not db.get(TrainingPlan, data.plan_id):
+        raise HTTPException(404, "Plan not found")
+    rows = db.scalars(
+        select(TrainingPlanLesson)
+        .where(TrainingPlanLesson.plan_id == data.plan_id)
+        .order_by(TrainingPlanLesson.lesson_order)
+    ).all()
+    items = [LessonItem(lesson_id=i.lesson_id, order=i.lesson_order) for i in rows]
+    # validate_items(db, account, items)
+    return create_personal(db, account, data.plan_name, items, data.plan_id)
+
+
+def create_personal(db, account, name, items, template=None):
     try:
-        new_custom_plan = CustomedPlan(
-            plan_name=data.plan_name,
-            template_plan_id=data.plan_id,
-            user_id=existing_account["user_id"],
-            source_type='preset',
-            status='not_started'
+        plan = CustomedPlan(
+            plan_name=name,
+            user_id=account["user_id"],
+            template_plan_id=template,
+            source_type="preset" if template is not None else "manual",
+            status="not_started",
         )
-        db.add(new_custom_plan)
+
+        db.add(plan)
         db.flush()
 
-        template_lessons = db.scalars(
-            select(TrainingPlanLesson)
-            .where(TrainingPlanLesson.plan_id == data.plan_id)
-            .order_by(TrainingPlanLesson.lesson_order)
-        ).all()
+        # 本次请求中已处理过的课程
+        processed_lessons = set()
 
-        for item in template_lessons:
+        for item in items:
+
             db.add(
                 PlanLesson(
-                    plan_id=new_custom_plan.id,
+                    plan_id=plan.id,
                     lesson_id=item.lesson_id,
-                    lesson_order=item.lesson_order,
-                    completed=False
+                    lesson_order=item.order,
+                    completed=False,
                 )
             )
-        db.commit()
-        return {
-            "message":"Add Template_plan successfully",
-        }
-    except IntegrityError as e:
-        db.rollback()
-        print("IntegrityError:", e)
-        print("Original error:", e.orig)
 
-        raise HTTPException(
-            status_code=409,
-            detail=str(e.orig)
-        )
+            if item.lesson_id in processed_lessons:
+                continue
 
-@router.post("/add_custom_plan")
-async def add_custom_plan(
-        data: AddCustomPlan,
-        db: Session = Depends(get_db),
-        existing_account: dict = Depends(permission_auth),
-):
-    if MEMBERSHIP_LEVEL[existing_account["membership_level"]]<MEMBERSHIP_LEVEL['pro']:
-        raise HTTPException(status_code=409, detail="No access")
-    try:
-        new_custom_plan = CustomedPlan(
-            plan_name=data.plan_name,
-            user_id=existing_account["user_id"],
-            source_type='manual',
-            status='not_started'
-        )
-        db.add(new_custom_plan)
-        db.flush()
+            processed_lessons.add(item.lesson_id)
 
-        for lesson_item in data.lesson_list:
-            new_plan_lesson = PlanLesson(
-                plan_id=new_custom_plan.id,
-                lesson_id=lesson_item.lesson_id,
-                lesson_order=lesson_item.order,
-                completed=False
+            existing_access = db.scalar(
+                select(LessonAccess)
+                .where(
+                    LessonAccess.account_id == account["account_id"],
+                    LessonAccess.lesson_id == item.lesson_id
+                )
             )
-            db.add(new_plan_lesson)
-        db.commit()
-        return {
-            "message":"Add Custom_plan successfully",
-        }
+
+            if existing_access is None:
+                db.add(
+                    LessonAccess(
+                        lesson_id=item.lesson_id,
+                        account_id=account["account_id"],
+                        granted_by=account["account_id"]
+                    )
+                )
+
+        save(db)
+
+        return {"plan_id": plan.id}
+
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Add Custom_plan Failed")
+        raise HTTPException(
+            status_code=409,
+            detail="Create plan failed"
+        )
+
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Database error"
+        )
+@router.post("/add_custom_plan")
+def add_custom(
+    data: AddCustomPlan, db: Session = Depends(get_db), account=Depends(permission_auth)
+):
+    if MEMBERSHIP_LEVEL[account['membership_level']]<MEMBERSHIP_LEVEL['pro']:
+        raise HTTPException(409, "You dont have access, You need to upgrade to PRO")
+    # validate_items(db, account, data.lesson_list)
+    return create_personal(db, account, data.plan_name, data.lesson_list)
 
 
+@router.get("/mine")
+def mine(db: Session = Depends(get_db), account=Depends(permission_read_auth)):
+    result = []
+    for plan in db.scalars(
+        select(CustomedPlan)
+        .where(CustomedPlan.user_id == account["user_id"])
+        .order_by(CustomedPlan.id)
+    ):
+        rows = db.execute(
+            select(PlanLesson, Lessons.lesson_name, Lessons.deleted_at)
+            .join(Lessons, Lessons.id == PlanLesson.lesson_id)
+            .where(PlanLesson.plan_id == plan.id)
+            .order_by(PlanLesson.lesson_order)
+        ).all()
+        result.append(
+            {
+                "plan_id": plan.id,
+                "plan_name": plan.plan_name,
+                "status": plan.status,
+                "lessons": [
+                    {
+                        "lesson_id": i.lesson_id,
+                        "lesson_name": name,
+                        "completed": i.completed,
+                        "archived": deleted is not None,
+                    }
+                    for i, name, deleted in rows
+                ],
+            }
+        )
+    return result
 
+
+class Progress(BaseModel):
+    completed: bool
+
+
+@router.put("/{plan_id}/lessons/{lesson_id}/progress")
+def progress(
+    plan_id: int,
+    lesson_id: int,
+    data: Progress,
+    db: Session = Depends(get_db),
+    account=Depends(permission_auth),
+):
+    plan = db.scalar(
+        select(CustomedPlan).where(CustomedPlan.id == plan_id).with_for_update()
+    )
+    if not plan or plan.user_id != account["user_id"]:
+        raise HTTPException(404, "Plan not found")
+    require_lesson_access(db, account, lesson_id)
+    item = db.get(PlanLesson, (lesson_id, plan_id))
+    if not item:
+        raise HTTPException(404, "Plan lesson not found")
+    item.completed = data.completed
+    item.completed_at = datetime.now(timezone.utc) if data.completed else None
+    db.flush()
+    items = db.scalars(select(PlanLesson).where(PlanLesson.plan_id == plan_id)).all()
+    plan.status = "completed" if all(i.completed for i in items) else "in_progress"
+    save(db)
+    return {"status": plan.status}
+
+
+@router.delete("/plan_delete/{plan_id}")
+def delete_personal_plan(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    account: dict = Depends(permission_auth),
+):
+    plan = db.scalar(
+        select(CustomedPlan)
+        .where(
+            CustomedPlan.id == plan_id,
+            CustomedPlan.user_id == account["user_id"]
+        )
+    )
+
+    if plan is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Plan not found"
+        )
+
+    try:
+        db.execute(
+            delete(PlanLesson)
+            .where(PlanLesson.plan_id == plan_id)
+        )
+
+        db.delete(plan)
+
+        db.commit()
+
+        return {
+            "message": "Plan deleted successfully",
+            "plan_id": plan_id
+        }
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Delete plan failed"
+        )

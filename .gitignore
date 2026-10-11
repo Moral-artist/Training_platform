@@ -1,12 +1,11 @@
+# Local credentials and generated files
 .env
 .env.*
 !.env.example
-
+.venv/
 __pycache__/
 *.pyc
-
-.venv/
-venv/
-
+.pytest_cache/
 .idea/
-.vscode/
+.DS_Store
+api_test_result.json

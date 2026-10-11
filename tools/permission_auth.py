@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Cookie
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from data_model.core_database import get_db
@@ -10,8 +10,12 @@ from dependencies.csrf import verify_csrf
 
 def resolve_account(db: Session, session: dict) -> dict:
     account = db.execute(
-        select(Account.id.label("account_id"), Roles.role_name.label("role"),
-               Account.is_active, Account.membership_level.label("membership_level"))
+        select(
+            Account.id.label("account_id"),
+            Roles.role_name.label("role"),
+            Account.membership_level.label("membership_level"),
+            Account.is_active,
+        )
         .join(Roles, Roles.id == Account.role_id)
         .where(Account.user_id == UUID(session["user_id"]))
     ).all()
@@ -22,15 +26,42 @@ def resolve_account(db: Session, session: dict) -> dict:
     account = account[0]
     if not account.is_active:
         raise HTTPException(403, "Account disabled")
-    return {"account_id": account.account_id, "user_id": session["user_id"],
-            "role": account.role, "membership_level": account.membership_level}
+    return {
+        "account_id": account.account_id,
+        "user_id": UUID(session["user_id"]),
+        "role": account.role,
+        "membership_level": account.membership_level,
+    }
 
 
-async def permission_auth(db: Session = Depends(get_db), session: dict = Depends(verify_csrf)):
+async def permission_auth(
+    db: Session = Depends(get_db), session: dict = Depends(verify_csrf)
+):
     """写接口：会话 + CSRF + 当前数据库角色。"""
     return resolve_account(db, session)
 
 
-async def permission_read_auth(db: Session = Depends(get_db), session: dict = Depends(get_current_session)):
+async def permission_read_auth(
+    db: Session = Depends(get_db), session: dict = Depends(get_current_session)
+):
     """读接口：会话 + 当前数据库角色，不要求 CSRF。"""
+    return resolve_account(db, session)
+
+
+async def optional_account(
+    session_id: str | None = Cookie(default=None), db: Session = Depends(get_db)
+):
+    """匿名目录可读取；存在且有效的会话仍检查停用账号。"""
+    from service.session import get_session
+
+    if not session_id:
+        return None
+    session = await get_session(session_id)
+    if not session:
+        return None
+    account = db.scalar(
+        select(Account).where(Account.user_id == UUID(session["user_id"]))
+    )
+    if not account or account.auth_version != session.get("auth_version", 0):
+        return None
     return resolve_account(db, session)
