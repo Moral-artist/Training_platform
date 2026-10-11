@@ -1,28 +1,21 @@
-# 培训平台前端
+# 前端
 
-本次版本接入私有 R2 + HLS + Worker + 短时播放 Token。完整配置步骤见交付根目录 `小白操作手册.md`，函数修改见 `清单.md`。
+测试运行环境为 Node 22.16。Vite 8 需要受支持的较新 Node；建议使用 Node 22.16 或更高版本。
 
-```bash
-npm install
+```
+npm ci
 cp .env.example .env
 npm run dev
-```
-
-默认 API：`http://localhost:8000`。本地浏览器统一使用 `http://localhost:5173`。生产修改 `VITE_API_BASE_URL` 后重新构建。
-
-- `/home`：访客可打开页面和专业入口；真实课程数据需要登录并获得授权。
-- `/lessons/:major`：展示当前账号已授权课程，`major` 为 electrical/hvac/elv/fire。
-- `/lessons/:major/:lessonId`：授权详情与正式视频播放器。
-- `/lessons/lessoncreate`：管理员上传、确认、创建资产关联课程，显示转码状态。
-- `/lessons/systemcreate`：保留管理员专业创建页。
-- `/lessons/accessmanage`：管理员搜索学员、选择课程、授权或撤销。
-- `/dashboard`：保留原工作台。
-
-Safari/iOS 优先原生 HLS，其余支持的浏览器使用 hls.js。播放请求前检查登录、CSRF 和课程授权；长视频自动续期。前端 `.env` 只填写 API 地址，不放 R2 或签名密钥。
-
-```bash
 npm test
 npm run build
 ```
 
-前端测试模拟媒体对象，不代表真实浏览器解码验收。需要配合后端、独立 FFmpeg 转码进程和部署好的 Cloudflare Worker。
+.env 中设置 VITE_API_BASE_URL。部署前重建 dist；默认 API 是 http://localhost:8000。生产 API 需使用 HTTPS。Web 服务器应将前端路由回退到 index.html，参考 ../deploy/nginx.example.conf。
+
+src/components/AppLayout.vue 是统一页头、侧栏、登出、语言切换入口。界面文案只维护在 src/i18n/messages.json，三种语言的 key 必须一致。
+
+首页读取公开课程目录；路由守卫保护登录后页面；后端再次验证课程权限。课程详情与播放器是两个路由。大文件上传使用分段签名，不向 R2 发送站点会话和 CSRF。
+
+上传草稿仅保存表单、资产 ID 和文件校验值，按账号隔离。刷新之后浏览器需要重新选择原文件；已完成的分段从 R2 查询，转码由后台独立任务继续完成。
+
+npm test 包含增量文件哈希、三语键完整性、HLS 续期/退出清理及 21 路由的 DOM 渲染检查。DOM 测试不代表真实浏览器画面或生产云端联调验收。

@@ -616,7 +616,7 @@ import {
 } from '../api/plan'
 
 import request from '../api/request'
-
+import { getMembershipLevel } from '../api/request'
 
 // =====================================================
 // 页面模式
@@ -714,11 +714,23 @@ const selectedTemplate = computed(() => {
 // =====================================================
 
 function switchMode(newMode) {
-
-  mode.value = newMode
-
   clearMessage()
 
+  const membershipLevel = getMembershipLevel()
+
+  // 示例：自定义计划要求等级 >= 1
+  if (
+    newMode === 'custom' &&
+    (membershipLevel === null || membershipLevel < 1)
+  ) {
+    showMessage(
+      '当前会员等级不足，无法使用自定义培训计划',
+      'error'
+    )
+    return
+  }
+
+  mode.value = newMode
 }
 
 
@@ -727,106 +739,25 @@ function switchMode(newMode) {
 // =====================================================
 
 async function loadPresetPlans() {
-
   presetLoading.value = true
 
-
   try {
+    const response = await getPresetPlanList()
 
-    const response =
-      await getPresetPlanList()
+    const rawData = response.data
 
-
-    /*
-      后端返回：
-
-      [
-        {
-          plan_id: 1,
-          plan_name: "基础培训",
-          order: 1,
-          lesson_id: 3,
-          lesson_name: "UPS基础"
-        },
-        ...
-      ]
-    */
-
-    const rawData =
-      response.data
-
-
-    const planMap =
-      new Map()
-
-
-    rawData.forEach(item => {
-
-      const planId =
-        item.plan_id
-
-
-      if (!planMap.has(planId)) {
-
-        planMap.set(planId, {
-
-          plan_id:
-            item.plan_id,
-
-          plan_name:
-            item.plan_name,
-
-          lessons: []
-
-        })
-
-      }
-
-
-      planMap
-        .get(planId)
-        .lessons
-        .push({
-
-          lesson_id:
-            item.lesson_id,
-
-          lesson_name:
-            item.lesson_name,
-
-          order:
-            item.order
-
-        })
-
-    })
-
-
-    // 确保课程顺序正确
-
-    planMap.forEach(plan => {
-
-      plan.lessons.sort(
-        (a, b) =>
-          a.order - b.order
+    presetPlans.value = rawData.map(plan => ({
+      plan_id: plan.plan_id,
+      plan_name: plan.plan_name,
+      description: plan.description,
+      lessons: [...(plan.lessons || [])].sort(
+        (a, b) => a.order - b.order
       )
-
-    })
-
-
-    presetPlans.value =
-      Array.from(
-        planMap.values()
-      )
+    }))
 
 
   } catch (error) {
-
-    console.error(
-      '加载预设培训计划失败:',
-      error
-    )
-
+    console.error('加载预设培训计划失败:', error)
 
     showMessage(
       error.response?.data?.detail ||
@@ -835,11 +766,8 @@ async function loadPresetPlans() {
     )
 
   } finally {
-
     presetLoading.value = false
-
   }
-
 }
 
 
@@ -877,6 +805,7 @@ async function loadLessons() {
     lessonSystems.value =
       response.data
 
+    console.log("alllesson:",lessonSystems.value)
 
     // 默认展开第一个专业
 

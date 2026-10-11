@@ -1,156 +1,44 @@
-<template>
-  <div class="system-create-page">
-    <div class="form-card">
-      <h2>Create System</h2>
-
-      <div class="form-item">
-        <label>System Name</label>
-
-        <input
-          v-model="systemName"
-          type="text"
-          placeholder="Please enter system name"
-          @keyup.enter="handleSubmit"
-        />
-      </div>
-
-      <button
-        class="submit-button"
-        :disabled="loading"
-        @click="handleSubmit"
-      >
-        {{ loading ? 'Submitting...' : 'Create System' }}
-      </button>
-
-      <div
-        v-if="message"
-        :class="['message', messageType]"
-      >
-        {{ message }}
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup>
-import { ref } from 'vue'
-import request from '../api/request'
-import router from '../router'
-
-const systemName = ref('')
-const loading = ref(false)
-
-const message = ref('')
-const messageType = ref('success')
-
-const showMessage = (text, type = 'success') => {
-  message.value = text
-  messageType.value = type
-
-  setTimeout(() => {
-    message.value = ''
-  }, 2500)
+import { onMounted, ref } from "vue";
+import { getCatalog } from "../api/lessons";
+import { t } from "../i18n";
+import request from "../api/request";
+import { useTask } from "../composables/useTask";
+import PageState from "../components/PageState.vue";
+import { notify } from "../stores/notices";
+const systems = ref([]),
+  name = ref(""),
+  { busy, error, run } = useTask();
+async function load() {
+  await run(async () => {
+    systems.value = await getCatalog();
+  });
 }
-
-const handleSubmit = async () => {
-  if (!systemName.value.trim()) {
-    showMessage('Please enter system name', 'error')
-    return
-  }
-
-  try {
-    loading.value = true
-
-    const response = await request.post(
-      '/api/lessons/systemsubmit',
-      null,
-      {
-        params: {
-          system_name: systemName.value
-        }
-      }
-    )
-
-    showMessage(
-      response.data.message || 'System created successfully',
-      'success'
-    )
-
-    systemName.value = ''
-    await router.push('/lessons/:major')
-
-  } catch (error) {
-    console.error('Create system failed:', error)
-
-    showMessage(
-      error.response?.data?.detail ||
-      'Create system failed',
-      'error'
-    )
-
-  } finally {
-    loading.value = false
-  }
+async function save() {
+  await run(async () => {
+    await request.post("/api/lessons/systemsubmit", null, {
+      params: { system_name: name.value.trim() },
+    });
+    name.value = "";
+    systems.value = await getCatalog();
+    notify("saved", "success");
+  });
 }
+onMounted(load);
 </script>
-
-<style scoped>
-.system-create-page {
-  display: flex;
-  justify-content: center;
-  padding-top: 80px;
-}
-
-.form-card {
-  width: 420px;
-  padding: 30px;
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  background: white;
-}
-
-.form-card h2 {
-  margin-bottom: 24px;
-}
-
-.form-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-item input {
-  padding: 10px 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.submit-button {
-  width: 100%;
-  margin-top: 20px;
-  padding: 11px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.submit-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.message {
-  margin-top: 16px;
-  padding: 10px;
-  border-radius: 6px;
-}
-
-.message.success {
-  background: #e8f5e9;
-}
-
-.message.error {
-  background: #ffebee;
-}
-</style>
+<template>
+  <section class="card">
+    <div class="tabs">
+      <span v-for="s in systems" :key="s.system_id" class="tag">{{
+        s.system_name
+      }}</span>
+    </div>
+    <form class="form" @submit.prevent="save">
+      <label class="field"
+        ><span>{{ t("systemName") }}</span
+        ><input v-model="name" required maxlength="200" /></label
+      ><button :disabled="busy">{{ t("save") }}</button>
+    </form>
+    <PageState :error="error" @retry="load" />
+  </section>
+</template>

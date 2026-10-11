@@ -1,107 +1,134 @@
-import { createRouter, createWebHistory } from 'vue-router'
-
-import Login from '../views/Login.vue'
-import Home from '../views/Home.vue'
-import Dashboard from '../views/Dashboard.vue'
-import PreRegister from '../views/PreRegister.vue'
-import ForgotPassword from '../views/ForgotPassword.vue'
-import testhome from '../views/TestHome0922.vue'
-import VerifyRegister from '../views/VerifyRegister.vue'
-import LessonList from '../views/LessonList.vue'
-import VideoDetail from '../views/VideoDetail.vue'
-import Root from '../views/Root.vue'
-import SystemCreate from '../views/SystemCreate.vue'
-import LessonCreate from '../views/LessonCreate.vue'
-import LessonAccessManage from '../views/LessonAccessManage.vue'
-import CreatePlan from '../views/CreatePlan.vue'
-import Mylesson from '../views/Mylesson.vue'
-
+import { createRouter, createWebHistory } from "vue-router";
+import { auth, loadUser, canUpload, isAdmin } from "../stores/auth";
+import CreatePlan from "../views/CreatePlan.vue";
+import { notify } from "../stores/notices";
+const view = (name) => () => import(`../views/${name}.vue`);
 const routes = [
-  { path: '/lessons/accessmanage', name: 'LessonAccessManage', component: LessonAccessManage },
+  { path: "/", redirect: "/home" },
   {
-    path: '/',
-    redirect: '/home'
+    path: "/home",
+    component: view("Home"),
+    meta: { title: "home", public: true },
   },
-
-  {
-    path: '/login',
-    name: 'Login',
-    component: Login
-  },
-
-  {
-    path: '/home',
-    name: 'Home',
-    component: Home,
+  ...[
+    ["/login", "login"],
+    ["/pre_register", "register"],
+    ["/verify_email", "verifyEmail"],
+    ["/forgot_password", "forgotPassword"],
+    ["/reset_password", "resetPassword"],
+  ].map(([path, title]) => ({
+    path,
+    component: view("Auth"),
     meta: {
-      requiresAuth: true
-    }
+      title,
+      public: true,
+      noSidebar: !["forgotPassword", "resetPassword"].includes(title),
+      authKind: title,
+    },
+  })),
+  { path: "/register", redirect: "/pre_register" },
+  { path: "/verify_register", redirect: "/verify_email" },
+  {
+    path: "/dashboard",
+    component: view("Dashboard"),
+    meta: { title: "dashboard" },
+  },
+  { path: "/profile", component: view("Profile"), meta: { title: "profile" } },
+  {
+    path: "/lessons/create",
+    component: view("LessonCreate"),
+    meta: { title: "createLesson", role: "manager" },
+  },
+  { path: "/lessons/lessoncreate", redirect: "/lessons/create" },
+  {
+    path: "/lessons/manage",
+    component: view("LessonManage"),
+    meta: { title: "manageLessons" },
   },
   {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: Dashboard,
-    meta: { requiresAuth: true }
+    path: "/lessons/:lessonId/edit",
+    component: view("LessonCreate"),
+    meta: { title: "editLesson" },
   },
   {
-    path: '/pre_register',
-    name: 'PreRegister',
-    component: PreRegister
+    path: "/lessons/accessmanage",
+    component: view("LessonAccessManage"),
+    meta: { title: "access", role: "admin" },
   },
   {
-    path: '/forgot_password',
-    name: 'ForgotPassword',
-    component: ForgotPassword
+    path: "/systems",
+    component: view("SystemCreate"),
+    meta: { title: "systems", role: "admin" },
+  },
+  { path: "/lessons/systemcreate", redirect: "/systems" },
+  {
+    path: "/lessons/:lessonId/detail",
+    component: view("LessonDetail"),
+    meta: { title: "videoDetail" },
   },
   {
-    path: '/testhome',
-    name: 'testhome',
-    component: testhome
+    path: "/video_detail/:lessonId",
+    component: view("LessonDetail"),
+    meta: { title: "videoDetail", noSidebar: true },
   },
   {
-    path: '/verify_register',
-    name: 'verify_register',
-    component: VerifyRegister
+    path: "/video_play/:lessonId",
+    component: view("VideoPlay"),
+    meta: { title: "playPage", noSidebar: true },
   },
   {
-    path: '/lessons/:major',
-    name: 'LessonList',
-    component: LessonList
+    path: "/lessons/:major/:lessonId",
+    redirect: (to) => `/lessons/${to.params.lessonId}/detail`,
   },
   {
-    path: '/lessons/:major/:lessonId',
-    name: 'VideoDetail',
-    component: VideoDetail
+    path: "/lessons/:systemId",
+    component: view("Home"),
+    meta: { title: "home" },
+  },
+  { path: "/plans", component: view("Plans"), meta: { title: "plans" } },
+  {
+    path: "/createplan",
+    component: view("CreatePlan"),
+    name:"createplan"
+  },
+  { path: "/exams", component: view("Exams"), meta: { title: "exams" } },
+  {
+    path: "/accounts",
+    component: view("Accounts"),
+    meta: { title: "accounts", role: "admin" },
   },
   {
-    path:'/lessons/systemcreate',
-    name:'systemcreate',
-    component: SystemCreate,
-    meta: { requiresAuth: true }
+    path: "/error",
+    component: view("ErrorPage"),
+    meta: { title: "errorTitle", public: true },
   },
   {
-    path:'/lessons/lessoncreate',
-    name:'lessoncreate',
-    component: LessonCreate,
-    meta: { requiresAuth: true }
+    path: "/:pathMatch(.*)*",
+    component: view("ErrorPage"),
+    meta: { title: "errorTitle", public: true, error: "HTTP_404" },
   },
-  {
-    path:'/plan/plancreate',
-    name:'plancreate',
-    component: CreatePlan,
-    meta: { requiresAuth: true }
-  },
-  {
-    path:'/user_info/mylessons',
-    name:'Mylessons',
-    component: Mylesson,
-    meta: { requiresAuth: true }
+
+];
+const router = createRouter({ history: createWebHistory(), routes });
+router.beforeEach(async (to) => {
+  try {
+    await loadUser(true);
+  } catch (error) {
+    if (to.path === "/error") return true;
+    return {
+      path: "/error",
+      query: { code: `HTTP_${error.response?.status || 503}` },
+    };
   }
-]
-
-const router = createRouter({
-  history: createWebHistory(),
-  routes
-})
-
-export default router
+  if (!to.meta.public && !auth.user)
+    return { path: "/login", query: { redirect: to.fullPath } };
+  if (
+    (to.meta.role === "admin" && !isAdmin()) ||
+    (to.meta.role === "manager" && !canUpload())
+  ) {
+    notify("HTTP_403");
+    return "/home";
+  }
+});
+router.onError(() => notify("unexpectedError", "error"));
+export default router;

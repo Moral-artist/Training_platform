@@ -1,675 +1,343 @@
-<template>
-  <div class="lesson-create-page">
-    <div class="form-card">
-
-      <h2>Create Lesson</h2>
-
-      <!-- System -->
-      <div class="form-item">
-        <label>System</label>
-
-        <select
-          v-model.number="lessonForm.system_id"
-          :disabled="systemsLoading || loading || uploading"
-        >
-          <option disabled value="">
-            {{ systemsLoading ? 'Loading systems...' : 'Please select system' }}
-          </option>
-
-          <option
-            v-for="system in systems"
-            :key="system.system_id"
-            :value="system.system_id"
-          >
-            {{ system.system_name }}
-          </option>
-        </select>
-      </div>
-
-
-      <!-- Lesson Name -->
-      <div class="form-item">
-        <label>Lesson Name</label>
-
-        <input
-          v-model="lessonForm.lesson_name"
-          type="text"
-          placeholder="Enter lesson name"
-          :disabled="loading || uploading"
-        />
-      </div>
-
-
-      <!-- Description -->
-      <div class="form-item">
-        <label>Description</label>
-
-        <textarea
-          v-model="lessonForm.description"
-          rows="5"
-          placeholder="Enter lesson description"
-          :disabled="loading || uploading"
-        ></textarea>
-      </div>
-
-
-      <!-- Video -->
-      <div class="form-item">
-        <label>Lesson Video</label>
-
-        <input
-          type="file"
-          accept="video/mp4,video/webm"
-          :disabled="loading || uploading || courseCreated"
-          @change="handleVideoChange"
-        />
-
-        <div
-          v-if="selectedVideo"
-          class="video-info"
-        >
-          {{ selectedVideo.name }}
-          -
-          {{ formatFileSize(selectedVideo.size) }}
-        </div>
-
-        <!-- 上传进度 -->
-        <div
-          v-if="uploading"
-          class="upload-progress"
-        >
-          <div class="progress-text">
-            Uploading {{ uploadProgress }}%
-          </div>
-
-          <div class="progress-bar">
-            <div
-              class="progress-value"
-              :style="{ width: uploadProgress + '%' }"
-            ></div>
-          </div>
-        </div>
-
-        <!-- 上传成功 -->
-        <div
-          v-if="lessonForm.video_asset_id"
-          class="upload-success"
-        >
-          源视频上传完成，处理状态：{{ videoStatus }}
-        </div>
-      </div>
-
-
-      <p v-if="videoStatus === 'uploaded' || videoStatus === 'processing'">视频正在后台转码。课程可以先保存，转码完成后才能播放。</p>
-      <p v-if="videoStatus === 'ready'">HLS 视频已就绪。</p>
-      <button v-if="videoStatus === 'failed'" type="button" @click="retryVideo">重新转码</button>
-      <p v-if="statusError">{{ statusError }}</p>
-      <p v-if="courseCreated">课程已保存。请到课程授权页给学员授权，然后到首页观看。</p>
-      <RouterLink v-if="courseCreated" to="/lessons/accessmanage">给学员授权</RouterLink>
-      <RouterLink v-if="courseCreated" to="/home">返回首页</RouterLink>
-      <button
-        class="submit-button"
-        :disabled="loading || uploading || courseCreated"
-        @click="handleSubmit"
-      >
-        {{
-          uploading
-            ? `Uploading ${uploadProgress}%`
-            : loading
-              ? 'Submitting...'
-              : 'Create Lesson'
-        }}
-      </button>
-
-
-      <div
-        v-if="messageBox.visible"
-        :class="['message-box', messageBox.type]"
-      >
-        {{ messageBox.message }}
-      </div>
-
-    </div>
-  </div>
-</template>
-
-
 <script setup>
 import {
+  computed,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
   reactive,
   ref,
-  onMounted,
-  onBeforeUnmount
-} from 'vue'
-
-  import axios from 'axios'
-  import request from '../api/request'
-
-
-
-  const loading = ref(false)
-  const systemsLoading = ref(false)
-
-  const uploading = ref(false)
-  const uploadProgress = ref(0)
-
-  const systems = ref([])
-  const videoStatus = ref('')
-  const statusError = ref('')
-  const courseCreated = ref(false)
-  let pollTimer = null
-  let alive = true
-  let currentAssetId = null
-
-
-  // 用户选择的视频
-  const selectedVideo = ref(null)
-
-
-  const lessonForm = reactive({
-    system_id: '',
-    lesson_name: '',
-    description: '',
-
-    // 仅提交视频资产 ID
-    video_asset_id: ''
-  })
-
-
-  const messageBox = reactive({
-    visible: false,
-    message: '',
-    type: 'warning'
-  })
-
-  let messageTimer = null
-
-
-  const showMessage = (
-    message,
-    type = 'warning'
-  ) => {
-    messageBox.message = message
-    messageBox.type = type
-    messageBox.visible = true
-
-    clearTimeout(messageTimer)
-
-    messageTimer = setTimeout(() => {
-      messageBox.visible = false
-    }, 2500)
+  watch,
+} from "vue";
+import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
+import request from "../api/request";
+import { getCatalog, getLesson } from "../api/lessons";
+import { fingerprintFile, transferFile } from "../api/upload";
+import { auth } from "../stores/auth";
+import { t } from "../i18n";
+import { useTask } from "../composables/useTask";
+import { notify } from "../stores/notices";
+import PageState from "../components/PageState.vue";
+const route = useRoute(),
+  router = useRouter(),
+  editing = computed(() => !!route.params.lessonId);
+const draftKey = `training-draft:${auth.user.account_id}:${route.params.lessonId || "create"}`;
+let cached;
+try {
+  cached = JSON.parse(localStorage.getItem(draftKey) || "null");
+} catch {
+  localStorage.removeItem(draftKey);
+}
+const form = reactive({
+  system_id: 0,
+  lesson_name: "",
+  description: "",
+  video_asset_id: "",
+  revision: 1,
+  request_id: crypto.randomUUID(),
+  ...(cached?.form || {}),
+});
+const upload = reactive({
+  asset_id: "",
+  content_hash: "",
+  status: "",
+  ...(cached?.upload || {}),
+});
+const maxUploadBytes = ref(8 * 1024 ** 3);
+const existingAsset = ref("");
+const file = ref(null),
+  systems = ref([]),
+  stage = ref(""),
+  progress = ref(0),
+  initialized = ref(false);
+const { busy, error, reference, run } = useTask();
+let controller,
+  timer,
+  alive = true;
+function persist() {
+  if (initialized.value)
+    localStorage.setItem(
+      draftKey,
+      JSON.stringify({ form: { ...form }, upload: { ...upload } }),
+    );
+}
+watch([form, upload], persist, { deep: true });
+async function load() {
+  await run(async () => {
+    systems.value = await getCatalog();
+    const { data: limits } = await request.get("/api/uploads/config");
+    maxUploadBytes.value = limits.max_upload_bytes || maxUploadBytes.value;
+    if (editing.value) {
+      const lesson = await getLesson(route.params.lessonId);
+      if (!lesson.can_manage) throw { response: { status: 403 } };
+      existingAsset.value = lesson.video_asset_id;
+      if (!cached)
+        Object.assign(form, {
+          system_id: lesson.system_id,
+          lesson_name: lesson.lesson_name,
+          description: lesson.description,
+          video_asset_id: lesson.video_asset_id,
+          revision: lesson.revision,
+        });
+    }
+    initialized.value = true;
+    if (upload.asset_id) await poll();
+  });
+}
+function choose(event) {
+  file.value = event.target.files[0] || null;
+}
+async function poll() {
+  clearTimeout(timer);
+  try {
+    const { data } = await request.get(
+      `/api/lessons_video/${upload.asset_id}/status`,
+    );
+    if (!alive) return;
+    upload.status = data.status;
+    if (["uploaded", "processing"].includes(data.status))
+      timer = setTimeout(poll, 5000);
+  } catch (err) {
+    if (!alive) return;
+    error.value = `HTTP_${err.response?.status || 502}`;
+    if (![401, 403, 404].includes(err.response?.status))
+      timer = setTimeout(poll, 10000);
   }
-
-
-  // ==========================
-  // 获取 System
-  // ==========================
-
-  const getSystems = async () => {
-    try {
-      systemsLoading.value = true
-
-      const response = await request.get(
-        '/api/lessons/systems'
+}
+async function submit() {
+  await run(async () => {
+    if (!form.system_id || !form.lesson_name.trim() || !form.description.trim())
+      throw new Error("UI:HTTP_422");
+    controller = new AbortController();
+    if (file.value) {
+      if (
+        !["video/mp4", "video/webm"].includes(file.value.type) ||
+        file.value.size <= 0 ||
+        file.value.size > maxUploadBytes.value
       )
-
-      systems.value = response.data
-
-    } catch (error) {
-
-      showMessage(
-        error.response?.data?.detail ||
-        'Failed to load systems',
-        'error'
-      )
-
-    } finally {
-
-      systemsLoading.value = false
-
-    }
-  }
-
-
-  // ==========================
-  // 选择视频
-  // ==========================
-
-  const handleVideoChange = event => {
-
-    const file = event.target.files[0]
-
-    if (!file) {
-      return
-    }
-
-
-    // 文件类型校验
-    const allowedTypes = [
-      'video/mp4',
-      'video/webm'
-    ]
-
-    if (!allowedTypes.includes(file.type)) {
-
-      showMessage(
-        'Only MP4 and WebM videos are supported',
-        'warning'
-      )
-
-      event.target.value = ''
-
-      return
-    }
-
-
-    // 最大 300MB
-    const maxSize = 300 * 1024 * 1024
-
-    if (file.size > maxSize) {
-
-      showMessage(
-        'Video size cannot exceed 300MB',
-        'warning'
-      )
-
-      event.target.value = ''
-
-      return
-    }
-
-
-    selectedVideo.value = file
-
-    // 如果重新选视频，旧 key 作废
-    lessonForm.video_asset_id = ''
-    currentAssetId = null
-    videoStatus.value = ''
-    clearTimeout(pollTimer)
-    uploadProgress.value = 0
-  }
-
-
-  // ==========================
-  // 向 FastAPI 获取预签名 URL
-  // ==========================
-
-  const getUploadUrl = async file => {
-
-    const response = await request.post(
-      '/api/lessons_video/upload_token',
-      {
-        filename: file.name,
-        content_type: file.type,  
-        size: file.size
-      }
-    )
-
-    return response.data
-  }
-
-
-  // ==========================
-  // 上传视频到 Cloudflare R2
-  // ==========================
-
-  const uploadVideo = async () => {
-
-    if (!selectedVideo.value) {
-      throw new Error('Please select video')
-    }
-
-
-    uploading.value = true
-    uploadProgress.value = 0
-
-
-    try {
-
-      const file = selectedVideo.value
-
-
-      // ① 获取上传地址与视频资产 ID
-      const uploadInfo = await getUploadUrl(file)
-
-
-      const {
-        upload_url,
-        asset_id
-      } = uploadInfo
-
-
-      // ② Vue 直接 PUT 到 R2
-      //
-      // 注意：
-      // 不使用 request
-      //
-      // 因为 request 会自动携带
-      // session cookie / csrf header
-      //
-      // 上传 R2 用普通 axios
-      await axios.put(
-        upload_url,
-        file,
+        throw new Error("UI:invalidFile");
+      stage.value = "hashing";
+      progress.value = 0;
+      const hash = await fingerprintFile(
+        file.value,
+        (value) => {
+          progress.value = value;
+        },
+        controller.signal,
+      );
+      if (upload.content_hash && upload.content_hash !== hash)
+        throw new Error("UI:fileMismatch");
+      const { data: info } = await request.post(
+        "/api/uploads/start",
         {
-          withCredentials: false,
-          headers: {
-            'Content-Type': file.type
+          filename: file.value.name,
+          size: file.value.size,
+          content_type: file.value.type,
+          content_hash: hash,
+        },
+        { signal: controller.signal },
+      );
+      Object.assign(upload, {
+        asset_id: info.asset_id,
+        content_hash: hash,
+        status: info.status,
+      });
+      persist();
+      if (info.status === "pending_upload") {
+        stage.value = "uploading";
+        progress.value = 0;
+        const result = await transferFile(
+          file.value,
+          info,
+          (value) => {
+            progress.value = value;
           },
-
-          onUploadProgress: progressEvent => {
-
-            if (!progressEvent.total) {
-              return
-            }
-
-            uploadProgress.value = Math.round(
-              (
-                progressEvent.loaded *
-                100
-              ) /
-              progressEvent.total
-            )
-          }
-        }
-      )
-
-
-      // ③ 通知后端检查 R2 文件，再加入转码队列。
-      await request.post(`/api/lessons_video/${asset_id}/complete`)
-      lessonForm.video_asset_id = asset_id
-      currentAssetId = asset_id
-      videoStatus.value = 'uploaded'
-      pollVideoStatus(asset_id)
-
-
-      showMessage(
-        'Video uploaded successfully',
-        'success'
-      )
-
-
-      return asset_id
-
-    } finally {
-
-      uploading.value = false
-
-    }
-  }
-
-
-  // ==========================
-  // 提交 Lesson
-  // ==========================
-
-  const handleSubmit = async () => {
-
-    if (!lessonForm.system_id) {
-
-      showMessage(
-        'Please select system',
-        'warning'
-      )
-
-      return
-    }
-
-
-    if (!lessonForm.lesson_name.trim()) {
-
-      showMessage(
-        'Please enter lesson name',
-        'warning'
-      )
-
-      return
-    }
-
-
-    if (!lessonForm.description.trim()) {
-
-      showMessage(
-        'Please enter description',
-        'warning'
-      )
-
-      return
-    }
-
-
-    if (!selectedVideo.value) {
-
-      showMessage(
-        'Please select lesson video',
-        'warning'
-      )
-
-      return
-    }
-
-
-    try {
-
-      loading.value = true
-
-
-      // ==========================
-      // 第一步：上传视频
-      // ==========================
-
-      if (!lessonForm.video_asset_id) {
-        await uploadVideo()
+          controller.signal,
+        );
+        upload.status = result.status;
+      } else notify("reused", "success");
+      if (upload.status === "failed") {
+        stage.value = "";
+        await poll();
+        return;
       }
-
-
-      // ==========================
-      // 第二步：创建 Lesson
-      // ==========================
-      const response = await request.post(
-        '/api/lessons/lessonsubmit',
-        {
-          system_id:
-            lessonForm.system_id,
-
-          lesson_name:
-            lessonForm.lesson_name.trim(),
-
-          description:
-            lessonForm.description.trim(),
-
-          video_asset_id:
-            lessonForm.video_asset_id
-        }
-      )
-
-
-      showMessage(
-        response.data.message ||
-        'Lesson created successfully',
-        'success'
-      )
-
-
-      courseCreated.value = true
-
-
-    } catch (error) {
-
-      console.error(
-        'Create lesson failed:',
-        error
-      )
-
-
-      showMessage(
-        error.response?.data?.detail ||
-        error.message ||
-        'Create lesson failed',
-        'error'
-      )
-
-    } finally {
-
-      loading.value = false
-
+      form.video_asset_id = upload.asset_id;
+    } else if (upload.asset_id) {
+      const { data: info } = await request.get(
+        `/api/uploads/${upload.asset_id}`,
+      );
+      if (info.status === "pending_upload") throw new Error("UI:fileMismatch");
+      if (info.status === "failed") throw new Error("UI:failed");
+      form.video_asset_id = upload.asset_id;
     }
-  }
-
-
-  // ==========================
-  // 文件大小显示
-  // ==========================
-
-  const formatFileSize = bytes => {
-
-    if (bytes < 1024 * 1024) {
-      return `${(bytes / 1024).toFixed(1)} KB`
+    if (!form.video_asset_id) throw new Error("UI:invalidFile");
+    stage.value = "binding";
+    persist();
+    const body = {
+      system_id: Number(form.system_id),
+      lesson_name: form.lesson_name.trim(),
+      description: form.description.trim(),
+      video_asset_id: form.video_asset_id,
+    };
+    const { data } = editing.value
+      ? await request.put(`/api/lessons/${route.params.lessonId}`, {
+          ...body,
+          revision: form.revision,
+        })
+      : await request.post("/api/lessons/lessonsubmit", {
+          ...body,
+          request_id: form.request_id,
+        });
+    if (!alive) return;
+    // 收到创建结果后才清除草稿；响应丢失时同一 request_id 安全复用结果。
+    initialized.value = false;
+    localStorage.removeItem(draftKey);
+    notify("saved", "success");
+    await router.replace(`/lessons/${data.lesson_id}/detail`);
+  });
+  stage.value = "";
+}
+function pause() {
+  controller?.abort();
+  persist();
+}
+async function discard() {
+  await run(async () => {
+    if (upload.asset_id) {
+      const { data } = await request.get(`/api/uploads/${upload.asset_id}`);
+      if (data.status === "pending_upload")
+        await request.delete(`/api/uploads/${upload.asset_id}`);
     }
-
-    return `${(
-      bytes /
-      1024 /
-      1024
-    ).toFixed(1)} MB`
-  }
-
-
-  async function pollVideoStatus(assetId) {
-    clearTimeout(pollTimer)
-    try {
-      const response = await request.get(`/api/lessons_video/${assetId}/status`)
-      if (!alive || currentAssetId !== assetId) return
-      videoStatus.value = response.data.status
-      statusError.value = ''
-      if (['uploaded', 'processing'].includes(videoStatus.value)) {
-        pollTimer = setTimeout(() => pollVideoStatus(assetId), 5000)
-      }
-    } catch (error) {
-      if (!alive || currentAssetId !== assetId) return
-      statusError.value = '状态查询失败，请检查登录和网络后刷新。'
-      if (![401, 403, 404].includes(error.response?.status)) {
-        pollTimer = setTimeout(() => pollVideoStatus(assetId), 10000)
-      }
+    // uploaded/ready 资产可能已绑定课程，仅解除本地草稿引用，绝不删除共享资产。
+    Object.assign(upload, { asset_id: "", content_hash: "", status: "" });
+    file.value = null;
+    progress.value = 0;
+    if (!editing.value) {
+      form.video_asset_id = "";
+      form.request_id = crypto.randomUUID();
     }
-  }
-
-  async function retryVideo() {
-    try {
-      await request.post(`/api/lessons_video/${lessonForm.video_asset_id}/retry`)
-      videoStatus.value = 'uploaded'
-      pollVideoStatus(lessonForm.video_asset_id)
-    } catch (error) {
-      showMessage(error.response?.data?.detail || '重试失败', 'error')
-    }
-  }
-
-  onBeforeUnmount(() => {
-    alive = false
-    clearTimeout(pollTimer)
-    clearTimeout(messageTimer)
-  })
-
-  // ==========================
-  // 页面初始化
-  // ==========================
-
-  onMounted(() => {
-    getSystems()
-  })
+    if (editing.value) form.video_asset_id = existingAsset.value;
+    initialized.value = false;
+    localStorage.removeItem(draftKey);
+    await nextTick();
+    initialized.value = true;
+  });
+}
+async function reloadCourse() {
+  await run(async () => {
+    const lesson = await getLesson(route.params.lessonId);
+    existingAsset.value = lesson.video_asset_id;
+    Object.assign(form, {
+      system_id: lesson.system_id,
+      lesson_name: lesson.lesson_name,
+      description: lesson.description,
+      video_asset_id: lesson.video_asset_id,
+      revision: lesson.revision,
+    });
+    persist();
+  });
+}
+async function retry() {
+  await run(async () => {
+    await request.post(`/api/lessons_video/${upload.asset_id}/retry`);
+    await poll();
+  });
+}
+onMounted(load);
+onBeforeRouteLeave(() => {
+  pause();
+});
+onBeforeUnmount(() => {
+  alive = false;
+  pause();
+  clearTimeout(timer);
+});
 </script>
-<style scoped>
-.lesson-create-page {
-  display: flex;
-  justify-content: center;
-  padding-top: 60px;
-}
-
-.form-card {
-  width: 500px;
-  padding: 30px;
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 12px;
-}
-
-.form-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-
-.form-item input,
-.form-item textarea,
-.form-item select {
-  padding: 10px 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.submit-button {
-  width: 100%;
-  padding: 11px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.submit-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.message-box {
-  margin-top: 16px;
-  padding: 10px;
-  border-radius: 6px;
-}
-
-.message-box.success {
-  background: #e8f5e9;
-}
-
-.message-box.warning {
-  background: #fff3cd;
-}
-
-.message-box.error {
-  background: #ffebee;
-}
-.video-info {
-  margin-top: 8px;
-  font-size: 14px;
-  color: #666;
-}
-
-.upload-progress {
-  margin-top: 12px;
-}
-
-.progress-text {
-  margin-bottom: 6px;
-  font-size: 13px;
-}
-
-.progress-bar {
-  height: 8px;
-  background: #eee;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-value {
-  height: 100%;
-  background: #333;
-  transition: width 0.2s;
-}
-
-.upload-success {
-  margin-top: 10px;
-  color: #2e7d32;
-  font-size: 14px;
-}
-</style>
+<template>
+  <PageState
+    :busy="busy && !initialized"
+    :error="!initialized ? error : ''"
+    :reference="reference"
+    @retry="load"
+  />
+  <form v-if="initialized" class="card form" @submit.prevent="submit">
+    <p>{{ t(editing ? "replaceHint" : "uploadHint") }}</p>
+    <p class="hint">
+      {{ t("fileSizeLimit") }}:
+      {{ (maxUploadBytes / 1024 ** 3).toFixed(1) }} GiB
+    </p>
+    <p v-if="upload.asset_id" class="notice">{{ t("resumeHint") }}</p>
+    <fieldset :disabled="busy" style="border: 0; padding: 0; margin: 0">
+      <label class="field"
+        ><span>{{ t("systemName") }}</span
+        ><select v-model.number="form.system_id" required>
+          <option :value="0" disabled>—</option>
+          <option v-for="s in systems" :key="s.system_id" :value="s.system_id">
+            {{ s.system_name }}
+          </option>
+        </select></label
+      >
+      <label class="field"
+        ><span>{{ t("lessonName") }}</span
+        ><input v-model="form.lesson_name" required maxlength="200"
+      /></label>
+      <label class="field"
+        ><span>{{ t("description") }}</span
+        ><textarea
+          v-model="form.description"
+          required
+          maxlength="10000"
+        ></textarea>
+      </label>
+      <label class="field"
+        ><span>{{ t("selectVideo") }}</span
+        ><input
+          :key="upload.content_hash"
+          type="file"
+          accept="video/mp4,video/webm"
+          @change="choose"
+      /></label>
+    </fieldset>
+    <div v-if="stage" class="notice">
+      <span><span class="spinner"></span>{{ t(stage) }} {{ progress }}%</span>
+    </div>
+    <progress v-if="stage" :value="progress" max="100"></progress>
+    <p v-if="upload.status">{{ t("status") }}: {{ t(upload.status) }}</p>
+    <PageState :error="error" :reference="reference" @retry="submit" />
+    <button
+      v-if="editing && error === 'HTTP_409'"
+      type="button"
+      class="secondary"
+      :disabled="busy"
+      @click="reloadCourse"
+    >
+      {{ t("reload") }}
+    </button>
+    <div class="actions">
+      <button :disabled="busy">
+        {{ t(editing ? "save" : "uploadSubmit") }}</button
+      ><button
+        v-if="busy && stage"
+        type="button"
+        class="secondary"
+        @click="pause"
+      >
+        {{ t("pause") }}
+      </button>
+      <button
+        v-if="upload.asset_id && !busy"
+        type="button"
+        class="secondary"
+        @click="discard"
+      >
+        {{ t("discard") }}</button
+      ><button
+        v-if="upload.status === 'failed'"
+        type="button"
+        :disabled="busy"
+        @click="retry"
+      >
+        {{ t("retry") }}
+      </button>
+    </div>
+  </form>
+</template>

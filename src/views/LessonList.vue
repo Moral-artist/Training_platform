@@ -89,6 +89,7 @@ watch(() => route.params.major, () => {
               <p>{{ lesson.description || '点击查看视频介绍' }}</p>
             </div>
             <RouterLink class="detail-link" :to="{ name: 'VideoDetail', params: { major: major.code, lessonId: lesson.id } }">查看详情 <span aria-hidden="true">→</span></RouterLink>
+            
           </article>
         </div>
       </section>

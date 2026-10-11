@@ -1,22 +1,29 @@
 <script setup>
-  import { watch } from 'vue'
-  import { useRoute } from 'vue-router'
-  import request,{ setCsrfToken } from './api/request'
-  const route = useRoute()
-  watch(() => route.meta.requiresAuth, async (requiresAuth) => {
-    if (!requiresAuth) return
-    try {
-      const response = await request.get('/api/user/user_info')
-
-      setCsrfToken(response.data.csrf_token)
-    } catch (error) {
-      console.log('Not logged in')
-    }
-  }, { immediate: true })
+import { onErrorCaptured, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import AppLayout from "./components/AppLayout.vue";
+import PageState from "./components/PageState.vue";
+const route = useRoute(),
+  crashed = ref(false);
+onErrorCaptured(() => {
+  crashed.value = true;
+  return false;
+});
+watch(
+  () => route.fullPath,
+  () => {
+    crashed.value = false;
+  },
+);
+function reload() {
+  window.location.reload();
+}
 </script>
-
-
-
 <template>
-  <router-view />
+  <AppLayout
+    ><PageState
+      v-if="crashed"
+      error="unexpectedError"
+      @retry="reload" /><RouterView v-else :key="route.fullPath"
+  /></AppLayout>
 </template>
