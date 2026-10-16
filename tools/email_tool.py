@@ -6,6 +6,9 @@ from data_model.config import settings
 
 
 def send_verify_email(to_email: str, code: str, tag: str = "register"):
+    print("SMTP_HOST:", settings.SMTP_HOST)
+    print("SMTP_PORT:", settings.SMTP_PORT)
+    print("SMTP_USE_SSL:", settings.SMTP_USE_SSL)
     if not settings.SMTP_HOST or not settings.SMTP_USER:
         raise RuntimeError("Email service is not configured")
     message = EmailMessage()

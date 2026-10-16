@@ -9,3 +9,6 @@ __pycache__/
 .idea/
 .DS_Store
 api_test_result.json
+.dockerignore
+docker-compose.yml
+Dockerfile.worker

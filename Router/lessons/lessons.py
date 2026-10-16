@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, Response, APIRouter, Query
 from sqlalchemy.orm import Session
 from data_model.core_database import get_db
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, delete
 from sqlalchemy.exc import IntegrityError
 from data_model.data_model import (
     Systems,
@@ -25,7 +25,8 @@ from core.playback_token import issue_playback_token
 from service.video_limits import rate_limit
 from uuid import UUID
 from data_model.config import settings
-
+import logging
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/lessons", tags=["lessons"])
 
 
@@ -204,8 +205,13 @@ async def lessonsubmit(
         db.add(new_system_lesson)
         db.commit()
         return {"message": "Lesson successfully created", "lesson_id": new_lesson.id}
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
+        logger.exception("Failed to create lesson")
+
+        print("数据库原始错误:", e.orig)
+        print("SQL语句:", e.statement)
+        print("SQL参数:", e.params)
         if lesson_data.request_id:
             prior = db.scalar(
                 select(Lessons).where(Lessons.request_id == lesson_data.request_id)
@@ -238,6 +244,46 @@ async def getsystems(
         for system in systems
     ]
 
+
+@router.delete("/systems_delete/{system_id}")
+async def deletesystem(
+        system_id: int,
+        db: Session = Depends(get_db),
+        account: dict = Depends(permission_auth),
+):
+    if account["role"]!="administer" and account["role"] != "manager":
+        raise HTTPException(409, "Permission denied")
+    try:
+        current_system = db.get(Systems, system_id)
+        if current_system is None:
+            raise HTTPException(404, detail="System not exist")
+        db.delete(current_system)
+        db.commit()
+        return {"message": "System successfully deleted"}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "delete system failed")
+
+
+@router.delete("/systems/{system_id}/lessons/{lesson_id}")
+async def deletesystem_lesson(
+        system_id: int,
+        lesson_id: int,
+        db: Session = Depends(get_db),
+        account: dict = Depends(permission_auth),
+):
+    if account["role"] != "administer" and account["role"] != "manager":
+        raise HTTPException(409, "Permission denied")
+    try:
+        current_system_lesson = db.get(SystemLesson, (system_id,lesson_id))
+        if current_system_lesson is None:
+            raise HTTPException(404, detail="System Lesson not exist")
+        db.delete(current_system_lesson)
+        db.commit()
+        return {"message": "Lesson System successfully deleted"}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "delete system failed")
 
 @router.get("/alllessons")
 async def getalllessons(
@@ -283,7 +329,78 @@ async def getalllessons(
         db.rollback()
         raise HTTPException(status_code=409, detail="Cannot get all lessons")
 
+@router.get("/manage_lessons")
+def manage_lessons(
+    current_page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    keyword: str = Query("", max_length=200),
+    db: Session = Depends(get_db),
+    account: dict = Depends(permission_read_auth),
+):
+    role = account["role"]
+    print(role)
+    if role not in {"administer", "manager"}:
+        raise HTTPException(
+            status_code=403,
+            detail="No course management permission"
+        )
 
+    query = select(Lessons).where(
+        Lessons.deleted_at.is_(None)
+    )
+
+    # Manager 只能查询自己创建的课程
+    if role == "manager":
+        query = query.where(
+            Lessons.created_by == account["account_id"]
+        )
+
+    # 后端搜索
+    keyword = keyword.strip()
+
+    if keyword:
+        name_condition = Lessons.lesson_name.ilike(
+            f"%{keyword}%"
+        )
+
+        if keyword.isdigit():
+            query = query.where(
+                or_(
+                    name_condition,
+                    Lessons.id == int(keyword)
+                )
+            )
+        else:
+            query = query.where(name_condition)
+
+    # 先统计符合条件的课程数量
+    total = db.scalar(
+        select(func.count())
+        .select_from(query.subquery())
+    ) or 0
+
+    # 只查询当前页
+    lessons = db.scalars(
+        query
+        .order_by(Lessons.id.desc())
+        .limit(page_size)
+        .offset((current_page - 1) * page_size)
+    ).all()
+
+    return {
+        "total_lessons": total,
+        "total_pages": (total + page_size - 1) // page_size,
+        "current_page": current_page,
+        "lessonlist": [
+            {
+                "lesson_id": lesson.id,
+                "lesson_name": lesson.lesson_name,
+                "revision": lesson.revision,
+                "can_manage": True,
+            }
+            for lesson in lessons
+        ]
+    }
 @router.get("/{lesson_id}/detail")
 def lesson_detail(
     lesson_id: int,
@@ -362,7 +479,7 @@ def revoke_lesson_access(
     db: Session = Depends(get_db),
     account: dict = Depends(permission_auth),
 ):
-    if account["role"] != "administer":
+    if account["role"] != "administer" and account["role"] != "manager":
         raise HTTPException(403, "Administrator required")
     grant = db.get(LessonAccess, (account_id, lesson_id))
     if grant:

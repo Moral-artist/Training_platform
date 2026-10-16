@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = ""
-    SMTP_USE_SSL: bool = False
+    SMTP_USE_SSL: bool = True
 
     # PLAYBACK_TOKEN_SECRET=<单独生成的高强度随机密钥>
     # VIDEO_WORKER_BASE_URL=https://<你的-Worker-域名>
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     FFPROBE_PATH: str = "ffprobe"
     TRANSCODE_TIMEOUT_SECONDS: int = 7200
     # 4K 源文件使用分段上传；旧单文件接口继续限制 300 MiB。
-    MAX_UPLOAD_BYTES: int = 8 * 1024 * 1024 * 1024
-    UPLOAD_PART_BYTES: int = 16 * 1024 * 1024
+    MAX_UPLOAD_BYTES: int = 500 * 1024 * 1024
+    UPLOAD_PART_BYTES: int = 10 * 1024 * 1024
     UPLOAD_RETENTION_HOURS: int = 48
     HLS_HEIGHTS: str = "720,1080,1440,2160"
     HLS_CRF: int = 21

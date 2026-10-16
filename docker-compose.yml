@@ -1,0 +1,23 @@
+services:
+  transcode-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+
+    container_name: training-transcode-worker
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      FFMPEG_PATH: ffmpeg
+      FFPROBE_PATH: ffprobe
+      PYTHONUNBUFFERED: "1"
+
+    volumes:
+      - transcode-temp:/tmp
+
+volumes:
+  transcode-temp:

@@ -1,9 +1,8 @@
-"""学习计划与课程授权分离；计划只能选已授权课程，不会自动授予权限。"""
 
 from uuid import UUID
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -261,6 +260,47 @@ def progress(
     plan.status = "completed" if all(i.completed for i in items) else "in_progress"
     save(db)
     return {"status": plan.status}
+
+
+@router.delete("/presetPlan_delete/{preset_plan_id}")
+def preset_plan_delete(
+        preset_plan_id: int,
+        db: Session = Depends(get_db),
+        account=Depends(permission_auth),
+):
+    if account['role']!='manager' and account['role'] != 'administer':
+        raise HTTPException(409, "You dont have access, only for manager or administer")
+
+    preset_plan = db.scalar(
+        select(TrainingPlan)
+        .where(
+            TrainingPlan.id == preset_plan_id,
+            or_(TrainingPlan.created_by == account['account_id'],
+                account['role'] == 'administer'),
+
+        )
+    )
+    if preset_plan is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Preset Plan not found"
+        )
+    try:
+
+        db.delete(preset_plan)
+
+        db.commit()
+
+        return {
+            "message": "Preset Plan deleted successfully",
+        }
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Delete preset plan failed"
+        )
 
 
 @router.delete("/plan_delete/{plan_id}")
