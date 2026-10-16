@@ -91,6 +91,15 @@ const routes = [
     component: view("CreatePlan"),
     name:"createplan"
   },
+  {
+    path: "/plans/templates/manage",
+    component: view("ManagePresetPlan"),
+    name: "createPresetPlan",
+    meta: {
+      title: "createTemplate",
+      role: "manager",
+    },
+  },
   { path: "/exams", component: view("Exams"), meta: { title: "exams" } },
   {
     path: "/accounts",

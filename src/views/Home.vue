@@ -1,165 +1,213 @@
 <script setup>
-import {
-  computed,
-  onMounted,
-  onBeforeUnmount,
-  ref,
-  watch
-} from "vue";
-import { useRoute } from "vue-router";
+  import {
+    computed,
+    onMounted,
+    onBeforeUnmount,
+    ref,
+    watch
+  } from "vue";
+  import { useRoute } from "vue-router";
+  import { notify } from "../stores/notices";
+  import { getSystems, getSystemLessons, deleteSystemLesson } from "../api/lessons";
+  import { auth } from "../stores/auth";
+  import { t } from "../i18n";
+  import { useTask } from "../composables/useTask";
+  import PageState from "../components/PageState.vue";
 
-import { getSystems, getSystemLessons } from "../api/lessons";
-import { auth } from "../stores/auth";
-import { t } from "../i18n";
-import { useTask } from "../composables/useTask";
-import PageState from "../components/PageState.vue";
+  const route = useRoute();
 
-const route = useRoute();
+  const systems = ref([]);
+  const selected = ref(null);
+  const lessons = ref([]);
+  const deletingId = ref(null);
 
-const systems = ref([]);
-const selected = ref(null);
-const lessons = ref([]);
+  const currentPage = ref(1);
+  const pageSize = 10;
+  const totalPages = ref(0);
+  const totalLessons = ref(0);
 
-const currentPage = ref(1);
-const pageSize = 10;
-const totalPages = ref(0);
-const totalLessons = ref(0);
-
-const { busy, error, reference, run } = useTask();
-
-// 固定的优先顺序，匹配数据库专业名称
-const priority = ["电气", "暖通", "弱电", "消防"];
-
-const sortedSystems = computed(() => {
-  return [...systems.value].sort((a, b) => {
-    const aIndex = priority.indexOf(a.system_name.trim());
-    const bIndex = priority.indexOf(b.system_name.trim());
-
-    if (aIndex !== -1 && bIndex !== -1) {
-      return aIndex - bIndex;
-    }
-
-    if (aIndex !== -1) return -1;
-    if (bIndex !== -1) return 1;
-
-    return a.system_name.localeCompare(
-      b.system_name,
-      "en",
-      { sensitivity: "base" }
+  const canDeleteLesson = computed(() => {
+    return ["administer", "manager"].includes(
+      auth.user?.role
     );
   });
-});
 
-const currentSystem = computed(() =>
-  systems.value.find(
-    s => s.system_id === selected.value
-  )
-);
+  const courseTotalText = computed(() =>
+    (t.courseTotal || "共 {count} 门课程")
+      .replace("{count}", String(totalLessons.value))
+  );
+  const { busy, error, reference, run } = useTask();
 
-const canPrev = computed(() => currentPage.value > 1);
-const canNext = computed(() =>
-  currentPage.value < totalPages.value
-);
+  // 固定的优先顺序，匹配数据库专业名称
+  const priority = ["电气", "暖通", "弱电", "消防"];
 
-// 标识当前请求，避免快速切换时旧响应覆盖新响应
-let requestVersion = 0;
+  const sortedSystems = computed(() => {
+    return [...systems.value].sort((a, b) => {
+      const aIndex = priority.indexOf(a.system_name.trim());
+      const bIndex = priority.indexOf(b.system_name.trim());
 
-async function loadLessons() {
-  if (selected.value === null) return;
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex;
+      }
 
-  const version = ++requestVersion;
-  const systemId = selected.value;
-  const page = currentPage.value;
+      if (aIndex !== -1) return -1;
+      if (bIndex !== -1) return 1;
 
-  await run(async () => {
-    const data = await getSystemLessons(
-      systemId,
-      page,
-      pageSize
+      return a.system_name.localeCompare(
+        b.system_name,
+        "en",
+        { sensitivity: "base" }
+      );
+    });
+  });
+
+  const currentSystem = computed(() =>
+    systems.value.find(
+      s => s.system_id === selected.value
+    )
+  );
+
+  const canPrev = computed(() => currentPage.value > 1);
+  const canNext = computed(() =>
+    currentPage.value < totalPages.value
+  );
+
+  // 标识当前请求，避免快速切换时旧响应覆盖新响应
+  let requestVersion = 0;
+
+  async function loadLessons() {
+    if (selected.value === null) return;
+
+    const version = ++requestVersion;
+    const systemId = selected.value;
+    const page = currentPage.value;
+
+    await run(async () => {
+      const data = await getSystemLessons(
+        systemId,
+        page,
+        pageSize
+      );
+
+      if (version !== requestVersion) return;
+
+      lessons.value = data.lessonlist ?? [];
+      totalLessons.value = data.total_lessons ?? 0;
+      totalPages.value = data.total_pages ?? 0;
+    });
+  }
+
+  async function removeLesson(lesson) {
+    if (!canDeleteLesson.value || busy.value || deletingId.value !== null) {
+      return;
+    }
+
+    const systemId = selected.value;
+    const lessonId = lesson.lesson_id;
+
+    if (!window.confirm(
+      `确定将「${lesson.lesson_name}」从当前专业移除吗？\n课程本身不会被删除。`
+    )) {
+      return;
+    }
+
+    deletingId.value = lessonId;
+
+    try {
+      await run(async () => {
+        await deleteSystemLesson(systemId, lessonId);
+      });
+
+      if (selected.value !== systemId) return;
+
+      notify("课程已从专业中移除", "success");
+
+      if (lessons.value.length === 1 && currentPage.value > 1) {
+        currentPage.value -= 1;
+      } else {
+        await loadLessons();
+      }
+    } catch (err) {
+      console.error("Delete lesson failed:", err);
+    } finally {
+      deletingId.value = null;
+    }
+  }
+
+  // 初始化：只加载专业名称
+  async function load() {
+    await run(async () => {
+      const data = await getSystems();
+      systems.value = Array.isArray(data) ? data : data.systems ?? [];
+    });
+
+    if (!systems.value.length) return;
+
+    const routeId = Number(route.params.systemId);
+
+    const exists = systems.value.some(
+      s => s.system_id === routeId
     );
 
-    if (version !== requestVersion) return;
+    const electrical = sortedSystems.value.find(
+      s => s.system_name.trim() === "电气"
+    );
 
-    lessons.value = data.lessonlist ?? [];
-    totalLessons.value = data.total_lessons ?? 0;
-    totalPages.value = data.total_pages ?? 0;
-  });
-}
+    selected.value = exists
+      ? routeId
+      : electrical?.system_id ??
+        sortedSystems.value[0].system_id;
+  }
 
-// 初始化：只加载专业名称
-async function load() {
-  await run(async () => {
-    const data = await getSystems();
-    systems.value = Array.isArray(data) ? data : data.systems ?? [];
-  });
+  // 切换专业时重置为第一页
+  function selectSystem(systemId) {
+    if (selected.value === systemId) return;
 
-  if (!systems.value.length) return;
+    selected.value = systemId;
+    currentPage.value = 1;
+  }
 
-  const routeId = Number(route.params.systemId);
+  // 点击翻页
+  function changePage(page) {
+    if (page < 1 || page > totalPages.value) return;
+    currentPage.value = page;
+  }
 
-  const exists = systems.value.some(
-    s => s.system_id === routeId
+  // 专业或者页码变化，重新请求后端
+  watch(
+    [selected, currentPage],
+    () => {
+      if (selected.value !== null) {
+        loadLessons();
+      }
+    }
   );
 
-  const electrical = sortedSystems.value.find(
-    s => s.system_name.trim() === "电气"
+  // 路由变化时同步专业
+  watch(
+    () => route.params.systemId,
+    (id) => {
+      const systemId = Number(id);
+
+      if (systems.value.some(s => s.system_id === systemId)) {
+        selectSystem(systemId);
+      }
+    }
   );
 
-  selected.value = exists
-    ? routeId
-    : electrical?.system_id ??
-      sortedSystems.value[0].system_id;
-}
-
-// 切换专业时重置为第一页
-function selectSystem(systemId) {
-  if (selected.value === systemId) return;
-
-  selected.value = systemId;
-  currentPage.value = 1;
-}
-
-// 点击翻页
-function changePage(page) {
-  if (page < 1 || page > totalPages.value) return;
-  currentPage.value = page;
-}
-
-// 专业或者页码变化，重新请求后端
-watch(
-  [selected, currentPage],
-  () => {
-    if (selected.value !== null) {
-      loadLessons();
-    }
+  function onLogout() {
+    loadLessons();
   }
-);
 
-// 路由变化时同步专业
-watch(
-  () => route.params.systemId,
-  (id) => {
-    const systemId = Number(id);
+  onMounted(() => {
+    load();
+    window.addEventListener("training-logout", onLogout);
+  });
 
-    if (systems.value.some(s => s.system_id === systemId)) {
-      selectSystem(systemId);
-    }
-  }
-);
-
-function onLogout() {
-  loadLessons();
-}
-
-onMounted(() => {
-  load();
-  window.addEventListener("training-logout", onLogout);
-});
-
-onBeforeUnmount(() => {
-  requestVersion++;
-  window.removeEventListener("training-logout", onLogout);
-});
+  onBeforeUnmount(() => {
+    requestVersion++;
+    window.removeEventListener("training-logout", onLogout);
+  });
 </script>
 
 <template>
@@ -179,14 +227,14 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
-    <!-- 课程标题 -->
+    <!-- 课程标题 --> 
     <div class="course-heading">
       <h2>
         {{ currentSystem?.system_name || "课程列表" }}
       </h2>
 
       <span v-if="!busy && !error" class="course-total">
-        共 {{ totalLessons }} 门课程
+        {{ courseTotalText }}
       </span>
     </div>
 
@@ -228,6 +276,17 @@ onBeforeUnmount(() => {
         <span v-if="!auth.user || !lesson.can_access" class="locked-button">
           {{ t("locked") }}
         </span>
+
+        <!-- 只有管理员和经理才显示 -->
+        <button
+          v-if="canDeleteLesson"
+          type="button"
+          class="lesson-delete-button"
+          :disabled="busy || deletingId !== null"
+          @click="removeLesson(lesson)"
+        >
+          {{ deletingId === lesson.lesson_id ? "删除中..." : t("delete") }}
+        </button>
       </article>
 
       <p v-if="!lessons.length" class="empty-message">
@@ -265,158 +324,181 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.course-page {
-  display: flex;
-  flex-direction: column;
-  gap: 26px;
-}
+  .course-page {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+  }
 
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.tab-button {
-  padding: 12px 24px;
-  border: 1px solid #dce5f7;
-  border-radius: 12px;
-  background: white;
-  color: #4565ef;
-  font-size: 16px;
-  cursor: pointer;
-  transition: 0.2s;
-}
-
-.tab-button:hover {
-  background: #edf2ff;
-}
-
-.tab-button.selected {
-  background: #3865e9;
-  border-color: #3865e9;
-  color: white;
-}
-
-.course-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.course-heading h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #203451;
-}
-
-.course-total {
-  color: #8190a7;
-  font-size: 14px;
-}
-
-.lesson-list {
-  border: 1px solid #dce5f7;
-  border-radius: 16px;
-  background: white;
-  overflow: hidden;
-}
-
-.lesson-row {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  min-height: 84px;
-  padding: 18px 28px;
-  border-bottom: 1px solid #edf1f7;
-}
-
-.lesson-row:last-of-type {
-  border-bottom: none;
-}
-
-.lesson-row:hover {
-  background: #f8faff;
-}
-
-.lesson-index {
-  width: 35px;
-  flex-shrink: 0;
-  color: #9aa8bd;
-  font-size: 15px;
-}
-
-.lesson-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.lesson-info h3 {
-  margin: 0 0 7px;
-  font-size: 16px;
-  color: #203451;
-  overflow-wrap: anywhere;
-}
-
-.lesson-status {
-  color: #647a9c;
-  font-size: 13px;
-}
-
-.lesson-button,
-.locked-button {
-  flex-shrink: 0;
-  padding: 10px 18px;
-  border-radius: 9px;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-.lesson-button {
-  background: #3865e9;
-  color: white;
-}
-
-.locked-button {
-  background: #edf1f8;
-  color: #96a3b7;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 18px;
-}
-
-.pagination button {
-  padding: 10px 20px;
-  background: white;
-  border: 1px solid #dce5f7;
-  border-radius: 9px;
-  color: #3865e9;
-  cursor: pointer;
-}
-
-.pagination button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.empty-message {
-  padding: 32px;
-  text-align: center;
-  color: #8190a7;
-}
-
-@media (max-width: 600px) {
-  .lesson-row {
-    padding: 16px 12px;
-    gap: 10px;
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
   }
 
   .tab-button {
-    padding: 10px 14px;
+    padding: 12px 24px;
+    border: 1px solid #dce5f7;
+    border-radius: 12px;
+    background: white;
+    color: #4565ef;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  .tab-button:hover {
+    background: #edf2ff;
+  }
+
+  .tab-button.selected {
+    background: #3865e9;
+    border-color: #3865e9;
+    color: white;
+  }
+
+  .course-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .course-heading h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #203451;
+  }
+
+  .course-total {
+    color: #8190a7;
+    font-size: 14px;
+  }
+
+  .lesson-list {
+    border: 1px solid #dce5f7;
+    border-radius: 16px;
+    background: white;
+    overflow: hidden;
+  }
+
+  .lesson-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-height: 84px;
+    padding: 18px 28px;
+    border-bottom: 1px solid #edf1f7;
+  }
+
+  .lesson-row:last-of-type {
+    border-bottom: none;
+  }
+
+  .lesson-row:hover {
+    background: #f8faff;
+  }
+
+  .lesson-index {
+    width: 35px;
+    flex-shrink: 0;
+    color: #9aa8bd;
+    font-size: 15px;
+  }
+
+  .lesson-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .lesson-info h3 {
+    margin: 0 0 7px;
+    font-size: 16px;
+    color: #203451;
+    overflow-wrap: anywhere;
+  }
+
+  .lesson-status {
+    color: #647a9c;
+    font-size: 13px;
+  }
+
+  .lesson-button,
+  .locked-button {
+    flex-shrink: 0;
+    padding: 10px 18px;
+    border-radius: 9px;
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .lesson-button {
+    background: #3865e9;
+    color: white;
+  }
+
+  .locked-button {
+    background: #edf1f8;
+    color: #96a3b7;
+  }
+
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .pagination button {
+    padding: 10px 20px;
+    background: white;
+    border: 1px solid #dce5f7;
+    border-radius: 9px;
+    color: #3865e9;
+    cursor: pointer;
+  }
+
+  .pagination button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .empty-message {
+    padding: 32px;
+    text-align: center;
+    color: #8190a7;
+  }
+
+  @media (max-width: 600px) {
+    .lesson-row {
+      padding: 16px 12px;
+      gap: 10px;
+    }
+
+    .tab-button {
+      padding: 10px 14px;
+    }
+  .lesson-delete-button {
+    margin-left: auto;
+    padding: 8px 14px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    background: #fff;
+    color: #dc2626;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+  }
+
+  .lesson-delete-button:hover:not(:disabled) {
+    background: #fef2f2;
+    border-color: #f87171;
+  }
+
+  .lesson-delete-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 </style>

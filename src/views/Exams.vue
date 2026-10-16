@@ -468,10 +468,10 @@
 
     <!-- 按专业、分页选择课程 -->
     <section class="card">
-      <h2>选择考试课程</h2>
+      <h2>{{ t("selectExamCourse") }}</h2>
       <div class="course-picker">
         <label class="field">
-          <span>专业</span>
+          <span>{{ t("selectSystem") }}</span>
           <select v-model.number="systemId" :disabled="busy" @change="selectSystem">
             <option v-for="s in sortedSystems" :key="s.system_id" :value="s.system_id">
               {{ s.system_name }}
@@ -482,7 +482,7 @@
         <label class="field">
           <span>{{ t("selectCourse") }}</span>
           <select v-model.number="course" :disabled="busy || !systemId" @change="selectCourse">
-            <option :value="0">请选择课程</option>
+            <option :value="0">{{ t("chooseCourse") }}</option>
             <option v-for="l in courses" :key="l.lesson_id" :value="l.lesson_id">
               {{ l.lesson_name }}
             </option>
@@ -491,7 +491,8 @@
               v-if="course && !courses.some((l) => Number(l.lesson_id) === course)"
               :value="course"
             >
-              {{ selectedCourseName || `课程 ${course}` }}（当前已选）
+              {{ selectedCourseName || t("courseFallback").replace("{id}", String(course)) }}
+              ({{ t("currentlySelected") }})
             </option>
           </select>
         </label>
@@ -499,11 +500,11 @@
 
       <div class="pagination" v-if="systemId">
         <button type="button" class="secondary" :disabled="busy || coursePage <= 1" @click="changeCoursePage(coursePage - 1)">
-          上一页
+          {{ t("previousPage") }}
         </button>
         <span>{{ coursePage }} / {{ courseTotalPages || 1 }}</span>
         <button type="button" class="secondary" :disabled="busy || coursePage >= courseTotalPages" @click="changeCoursePage(coursePage + 1)">
-          下一页
+          {{ t("nextPage") }}
         </button>
       </div>
 
@@ -512,13 +513,13 @@
 
     <!-- 当前课程的考试列表 -->
     <section class="card" v-if="course && eligible">
-      <h2>课程考试</h2>
+      <h2>{{ t("courseExams") }}</h2>
       <p v-if="!exams.length" class="muted">{{ t("empty") }}</p>
 
       <div v-for="e in exams" :key="e.exam_id" class="exam-row">
         <div class="exam-name">
           <h3>{{ e.exam_name }}</h3>
-          <small>{{ e.questions?.length || 0 }} 道题目</small>
+          <small>{{ t("questionCount").replace("{count}", String(e.questions?.length || 0)) }}</small>
         </div>
         <div class="actions">
           <button type="button" :disabled="busy" @click="start(e)">{{ t("startExam") }}</button>
@@ -529,7 +530,7 @@
             :disabled="busy || !managedExams.some((m) => m.exam_id === e.exam_id)"
             @click="editExistingExam(managedExams.find((m) => m.exam_id === e.exam_id))"
           >
-            修改考试
+            {{ t("editExam") }}
           </button>
           <button v-if="manage" type="button" class="danger" :disabled="busy" @click="deleteId = e.exam_id">
             {{ t("delete") }}
@@ -582,15 +583,15 @@
     >
       <div class="editor-title">
         <div>
-          <h2>{{ editingExamId !== null ? "修改已有考试" : "创建课程考试" }}</h2>
-          <p class="muted" v-if="editingExamId !== null">试卷 ID：{{ editingExamId }}（保存时不会新增试卷）</p>
-          <p class="muted" v-else>当前课程没有考试，可创建一份试卷。</p>
+          <h2> {{ editingExamId !== null ? t("editExistingExam") : t("createCourseExam") }} </h2>
+          <p class="muted" v-if="editingExamId !== null">{{ t("examIdNotice").replace("{id}", String(editingExamId)) }}</p>
+          <p class="muted" v-else>{{ t("noCourseExam") }}</p>
         </div>
-        <span class="mode-chip">{{ editingExamId !== null ? "编辑模式" : "创建模式" }}</span>
+        <span class="mode-chip">{{ editingExamId !== null ? t("editMode") : t("createMode") }}</span>
       </div>
 
       <div v-if="managedExams.length > 1" class="existing-exams">
-        <strong>选择要修改的试卷：</strong>
+        <strong>{{ t("selectExamToEdit") }}</strong>
         <button
           v-for="e in managedExams"
           :key="e.exam_id"
@@ -602,23 +603,23 @@
       </div>
 
       <p v-if="editingExamId !== null" class="notice">
-        如果该试卷已有用户作答记录，按当前后端设计，修改题目会被拒绝（409），以保护历史成绩。
+        {{ t("examHistoryWarning") }}
       </p>
       <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
 
       <label class="field">
         <span>{{ t("examName") }}</span>
-        <input v-model="name" required maxlength="200" placeholder="请输入试卷名称" />
+        <input v-model="name" required maxlength="200"  :placeholder="t('examNamePlaceholder')" />
       </label>
 
       <section v-for="(q, index) in questions" :key="q.uid" class="question admin-question">
         <div class="question-heading">
-          <strong>第 {{ index + 1 }} 题</strong>
+          <strong>{{ t("questionNumber").replace("{count}", String(index + 1)) }}</strong>
           <div class="actions">
             <select v-model="q.question_type" :aria-label="t('questions')" @change="changeQuestionType(q)">
-              <option value="singleQuestion">单选题</option>
-              <option value="multipleQuestions">多选题</option>
-              <option value="shortAnswer">简答题</option>
+              <option value="singleQuestion">{{ t("singleQuestion") }}</option>
+              <option value="multipleQuestions">{{ t("multipleQuestions") }}</option>
+              <option value="shortAnswer">{{ t("shortAnswer") }}</option>
             </select>
             <button type="button" class="text-button danger-text" :disabled="busy" @click="questions.splice(index, 1)">
               {{ t("delete") }}
@@ -632,11 +633,23 @@
         </label>
 
         <label v-if="q.question_type === 'shortAnswer'" class="field">
-          <span>简答题参考答案</span>
-          <textarea v-model="q.answer" required rows="3"></textarea>
+          <span>{{ t("shortAnswerReference") }}</span>
+          <textarea
+            v-model="q.question_name"
+            required
+            maxlength="2000"
+            rows="2"
+            :placeholder="t('questionContentPlaceholder')"
+          ></textarea>
         </label>
         <template v-else>
-          <p class="muted">{{ q.question_type === 'singleQuestion' ? '单选：标记 1 个正确答案' : '多选：至少标记 2 个正确答案' }}</p>
+          <p class="muted">
+            {{
+              q.question_type === "singleQuestion"
+                ? t("singleAnswerHint")
+                : t("multipleAnswerHint")
+            }}
+          </p>
           <div v-for="(o, oi) in q.options" :key="o.uid" class="option-edit-row">
             <label class="correct-picker">
               <input
@@ -647,20 +660,26 @@
                 @change="selectSingleCorrect(q, o.uid)"
               />
               <input v-else v-model="o.is_correct" type="checkbox" />
-              <span>正确</span>
+              <span>{{ t("correct") }}</span>
             </label>
             <span class="option-letter">{{ o.option_key }}</span>
-            <input v-model="o.option_value" required maxlength="2000" :placeholder="`选项 ${o.option_key}`" />
-            <button type="button" class="text-button" :disabled="busy || q.options.length <= 2" @click="removeOption(q, oi)">移除</button>
+            <input v-model="o.option_value" required maxlength="2000" :placeholder="t('optionPlaceholder').replace('{key}', o.option_key)" />
+            <button type="button" class="text-button" :disabled="busy || q.options.length <= 2" @click="removeOption(q, oi)">{{ t("removeOption") }}</button>
           </div>
-          <button type="button" class="secondary" :disabled="busy || q.options.length >= 26" @click="addOption(q)">+ 添加选项</button>
+          <button type="button" class="secondary" :disabled="busy || q.options.length >= 26" @click="addOption(q)">{{ t("addOptionButton") }}</button>
         </template>
       </section>
 
       <div class="actions editor-actions">
         <button type="button" class="secondary" :disabled="busy || questions.length >= 200" @click="addQuestion">{{ t("addQuestion") }}</button>
         <button type="submit" :disabled="busy || !questions.length">
-          {{ busy ? "保存中..." : editingExamId !== null ? "保存修改" : "创建考试" }}
+          {{
+            busy
+              ? t("saving")
+              : editingExamId !== null
+                ? t("saveChanges")
+                : t("createExam")
+          }}
         </button>
       </div>
     </form>
@@ -669,9 +688,11 @@
     <section class="card table-wrap">
       <h2>{{ t("attempts") }}</h2>
       <table>
-        <thead><tr>
-          <th>ID</th><th>{{ t("examName") }}</th><th>{{ t("score") }}</th><th>{{ t("status") }}</th>
-        </tr></thead>
+        <thead>
+          <tr>
+            <th>ID</th><th>{{ t("examName") }}</th><th>{{ t("score") }}</th><th>{{ t("status") }}</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="a in visibleAttempts" :key="a.attempt_id">
             <td>{{ a.attempt_id }}</td>
@@ -679,7 +700,11 @@
             <td>{{ a.score ?? "—" }}</td>
             <td>{{ t(a.submitted ? (a.passed ? "passed" : "notPassed") : "in_progress") }}</td>
           </tr>
-          <tr v-if="!visibleAttempts.length"><td colspan="4" class="muted">暂无考试记录</td></tr>
+          <tr v-if="!visibleAttempts.length">
+            <td colspan="4" class="muted">
+              {{ t("noExamAttempts") }}
+            </td>
+          </tr>
         </tbody>
       </table>
     </section>

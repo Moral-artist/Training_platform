@@ -16,9 +16,11 @@ const links = [
   ["exams", "/exams", "user"],
   ["createLesson", "/lessons/create", "manager"],
   ["manageLessons", "/lessons/manage", "user"],
+  ["managePresetPlan","/plans/templates/manage", "manager"],
   ["systems", "/systems", "admin"],
   ["access", "/lessons/accessmanage", "admin"],
   ["accounts", "/accounts", "admin"],
+  
 ];
 function enabled(level) {
   return (

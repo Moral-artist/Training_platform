@@ -147,8 +147,10 @@ onMounted(load);
 
   <section class="plans-section">
     <div class="plans-header">
-      <h2>我的培训计划</h2>
-      <span class="plans-count">{{ plans.length }} 个计划</span>
+      <h2>{{ t("myTrainingPlans") }}</h2>
+      <span class="plans-count">
+        {{ plans.length }} {{ t("planCount") }}
+      </span>
     </div>
     <div class="plans-grid">
       <article
@@ -166,8 +168,13 @@ onMounted(load);
           <div>
             <h3>{{ plan.plan_name }}</h3>
             <p class="plan-subtitle">
-              共 {{ plan.lessons?.length || 0 }} 门课程 ·
-              已完成 {{ getCompletedCount(plan) }} 门
+              {{ t("totalCoursesPrefix") }}
+              {{ plan.lessons?.length || 0 }}
+              {{ t("courseUnit") }}
+              ·
+              {{ t("completedPrefix") }}
+              {{ getCompletedCount(plan) }}
+              {{ t("completedUnit") }}
             </p>
           </div>
 
@@ -176,13 +183,7 @@ onMounted(load);
               class="plan-status"
               :class="{ finished: plan.status === 'completed' }"
             >
-              {{
-                plan.status === 'completed'
-                  ? '已完成'
-                  : plan.status === 'in_progress'
-                    ? '进行中'
-                    : '未开始'
-              }}
+            {{ t(plan.status) }}
             </span>
 
             <span
@@ -201,13 +202,7 @@ onMounted(load);
                   finished: plan.status === 'completed'
                 }"
               >
-                {{
-                  plan.status === 'completed'
-                    ? '已完成'
-                    : plan.status === 'in_progress'
-                      ? '进行中'
-                      : '未开始'
-                }}
+              {{ t(plan.status) }}
               </span>
 
               <button
@@ -218,8 +213,8 @@ onMounted(load);
               >
                 {{
                   deletingPlanId === plan.plan_id
-                    ? '删除中...'
-                    : '删除'
+                    ? t("deleteInProgress")
+                    : t("delete")
                 }}
               </button>
             </div>
@@ -229,7 +224,7 @@ onMounted(load);
 
         <!-- 学习进度：折叠后仍然显示 -->
         <div class="progress-header">
-          <span>学习进度</span>
+          <span>{{ t("learningProgress") }}</span>
           <strong>{{ getProgress(plan) }}%</strong>
         </div>
 
@@ -272,10 +267,10 @@ onMounted(load);
                 >
                   {{
                     lesson.archived
-                      ? '已归档'
+                      ? t("archived")
                       : lesson.completed
-                        ? '✓ 已完成'
-                        : '○ 未完成'
+                        ? '✓ ' + t("completed")
+                        : '○ ' + t("incomplete")
                   }}
                 </span>
               </div>
@@ -290,12 +285,12 @@ onMounted(load);
                   }
                 }"
               >
-                {{ lesson.completed ? '复习' : '开始学习' }}
+                {{ lesson.completed ? t("reviewLesson") : t("startLearning") }}
                 <span>→</span>
               </RouterLink>
 
               <span v-else class="lesson-unavailable">
-                不可访问
+                {{ t("unavailable") }}
               </span>
             </div>
 
@@ -303,7 +298,7 @@ onMounted(load);
               v-if="!plan.lessons?.length"
               class="empty-lessons"
             >
-              此计划暂无课程
+              {{ t("planNoLessons") }}
             </p>
           </div>
 
@@ -320,7 +315,7 @@ onMounted(load);
                 getCurrentPage(plan.plan_id) - 1
               )"
             >
-              上一页
+              {{ t("previousPage") }}
             </button>
 
             <span class="page-info">
@@ -337,21 +332,21 @@ onMounted(load);
                 getCurrentPage(plan.plan_id) + 1
               )"
             >
-              下一页
+              {{ t("nextPage") }}
             </button>
           </div>
         </div>
       </article>
     </div>
     <div v-if="!plans.length" class="plans-empty">
-      <h3>还没有培训计划</h3>
-      <p>创建一个学习计划，开始你的学习之旅。</p>
+      <h3>{{ t("noTrainingPlans") }}</h3>
+      <p>{{ t("createPlanPrompt") }}</p>
     </div>
   </section>
   <div v-if="deletingPlanId !== null" class="deleting-overlay">
       <div class="deleting-message">
         <span class="spinner"></span>
-        正在删除培训计划，请稍候...
+        {{ t("deletingPlanMessage") }}
       </div>
   </div>
 <!--   <p v-if="!courses.length">{{ t("empty") }}</p> -->

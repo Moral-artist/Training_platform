@@ -1,44 +1,45 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from "vue";
-import { useRoute } from "vue-router";
-import { getLesson } from "../api/lessons";
-import request from "../api/request";
-import { t } from "../i18n";
-import { useTask } from "../composables/useTask";
-import PageState from "../components/PageState.vue";
-const route = useRoute(),
-  lesson = ref(null),
-  { busy, error, reference, run } = useTask();
-let timer,
-  alive = true;
-async function load() {
-  await run(async () => {
-    const data = await getLesson(route.params.lessonId);
-    if (alive) lesson.value = data;
+  import { onMounted, onBeforeUnmount, ref } from "vue";
+  import { useRoute } from "vue-router";
+  import { getLesson } from "../api/lessons";
+  import request from "../api/request";
+  import { t } from "../i18n";
+  import { useTask } from "../composables/useTask";
+  import PageState from "../components/PageState.vue";
+  const route = useRoute(),
+    lesson = ref(null),
+    { busy, error, reference, run } = useTask();
+  let timer,
+    alive = true;
+  async function load() {
+    await run(async () => {
+      const data = await getLesson(route.params.lessonId);
+      if (alive) lesson.value = data;
+    });
+    clearTimeout(timer);
+    if (
+      alive &&
+      !error.value &&
+      ["uploaded", "processing"].includes(lesson.value?.video_status)
+    )
+      timer = setTimeout(load, 5000);
+  }
+  async function retryVideo() {
+    await run(async () => {
+      await request.post(
+        `/api/lessons_video/${lesson.value.video_asset_id}/retry`,
+      );
+      lesson.value.video_status = "uploaded";
+    });
+    if (!error.value) await load();
+  }
+  onMounted(load);
+  onBeforeUnmount(() => {
+    alive = false;
+    clearTimeout(timer);
   });
-  clearTimeout(timer);
-  if (
-    alive &&
-    !error.value &&
-    ["uploaded", "processing"].includes(lesson.value?.video_status)
-  )
-    timer = setTimeout(load, 5000);
-}
-async function retryVideo() {
-  await run(async () => {
-    await request.post(
-      `/api/lessons_video/${lesson.value.video_asset_id}/retry`,
-    );
-    lesson.value.video_status = "uploaded";
-  });
-  if (!error.value) await load();
-}
-onMounted(load);
-onBeforeUnmount(() => {
-  alive = false;
-  clearTimeout(timer);
-});
 </script>
+
 <template>
   <PageState
     :busy="busy && !lesson"
