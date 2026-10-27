@@ -1,7 +1,7 @@
 import request from './request'
 
 // 获取某课程的考试
-export async function getExams(lessonId) {
+/* export async function getExams(lessonId) {
   return (
     await request.get('/api/exams/getExams', {
       params: {
@@ -9,7 +9,7 @@ export async function getExams(lessonId) {
       }
     })
   ).data
-}
+} */
 
 // 开始一次考试
 /* export async function startExam(examId) {
@@ -28,14 +28,14 @@ export async function submitExam(data) {
 } */
 
 // 创建考试
-export async function createExam(data) {
+/* export async function createExam(data) {
   const response = await request.post("/api/exams/createExams", data);
   return response.data;
-}
+} */
 
 // 删除考试
 // 你的后端 exam_id: int 是 query 参数，不是 JSON body
-export async function deleteExam(examId) {
+/* export async function deleteExam(examId) {
   return (
     await request.post(
       '/api/exams/deleteExams',
@@ -48,6 +48,8 @@ export async function deleteExam(examId) {
     )
   ).data
 }
+ */
+
 
 export async function getLessonExams(lessonId) {
   const res = await request.get("/api/exams/getExams", {

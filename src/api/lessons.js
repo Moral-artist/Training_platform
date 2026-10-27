@@ -2,8 +2,12 @@ import request from "./request";
 export async function getPlayAuthorization(lessonId) {
   return (await request.post(`/api/lessons/${lessonId}/play`)).data;
 }
-export async function getCatalog() {
-  return (await request.get("/api/lessons/catalog")).data;
+export async function getCatalog(page = 1, limit = 20) {
+  return (
+    await request.get("/api/lessons/catalog", {
+      params: { page, limit },
+    })
+  ).data;
 }
 export async function getLesson(id) {
   return (await request.get(`/api/lessons/${id}/detail`)).data;

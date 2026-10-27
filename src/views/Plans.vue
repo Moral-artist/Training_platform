@@ -14,18 +14,30 @@ const mine = ref([]),
   name = ref(""),
   description = ref(""),
   { busy, error, run } = useTask();
+const catalogPage = ref(1);
+const catalogPages = ref(0);
+const CATALOG_LIMIT = 20;
 async function fetchLists() {
   const [a, b, c] = await Promise.all([
     request.get("/api/plan/mine"),
     request.get("/api/plan/preset_planlist"),
-    getCatalog(),
+    getCatalog(catalogPage.value, CATALOG_LIMIT),
   ]);
   mine.value = a.data;
   templates.value = b.data;
-  courses.value = c.flatMap((s) => s.lessons.filter((l) => l.can_access));
+  courses.value = c.items.flatMap((s) =>
+    s.lessons.filter((l) => l.can_access),
+  );
+  catalogPages.value = c.total_pages;
 }
 async function load() {
   await run(fetchLists);
+}
+async function changeCatalogPage(page) {
+  if (page < 1 || page > catalogPages.value || page === catalogPage.value)
+    return;
+  catalogPage.value = page;
+  await load();
 }
 async function create(template = false) {
   await run(async () => {
@@ -87,6 +99,25 @@ onMounted(load);
             l.lesson_name
           }}</label
         >
+      </div>
+      <div v-if="catalogPages > 1" class="actions">
+        <button
+          type="button"
+          class="secondary"
+          :disabled="busy || catalogPage === 1"
+          @click="changeCatalogPage(catalogPage - 1)"
+        >
+          {{ t("previousPage") }}
+        </button>
+        <span>{{ catalogPage }} / {{ catalogPages }}</span>
+        <button
+          type="button"
+          class="secondary"
+          :disabled="busy || catalogPage >= catalogPages"
+          @click="changeCatalogPage(catalogPage + 1)"
+        >
+          {{ t("nextPage") }}
+        </button>
       </div>
       <div class="actions">
         <button :disabled="busy">{{ t("createPlan") }}</button

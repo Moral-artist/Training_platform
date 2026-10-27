@@ -12,9 +12,14 @@ const courses = ref([]),
   accounts = ref([]),
   grants = ref([]),
   { busy, error, run } = useTask();
+const catalogPage = ref(1);
+const catalogPages = ref(0);
+const CATALOG_LIMIT = 20;
 async function load() {
   await run(async () => {
-    courses.value = (await getCatalog()).flatMap((s) => s.lessons);
+    const catalog = await getCatalog(catalogPage.value, CATALOG_LIMIT);
+    courses.value = catalog.items.flatMap((s) => s.lessons);
+    catalogPages.value = catalog.total_pages;
     accounts.value = (
       await request.get("/api/lessons/access_accounts", {
         params: { search: search.value },
@@ -25,6 +30,14 @@ async function load() {
         await request.get(`/api/lessons/${course.value}/access`)
       ).data;
   });
+}
+async function changeCatalogPage(page) {
+  if (page < 1 || page > catalogPages.value || page === catalogPage.value)
+    return;
+  catalogPage.value = page;
+  course.value = 0;
+  grants.value = [];
+  await load();
 }
 async function toggle(id) {
   await run(async () => {
@@ -53,6 +66,25 @@ onMounted(load);
         </option>
       </select></label
     >
+    <div v-if="catalogPages > 1" class="actions">
+      <button
+        type="button"
+        class="secondary"
+        :disabled="busy || catalogPage === 1"
+        @click="changeCatalogPage(catalogPage - 1)"
+      >
+        {{ t("previousPage") }}
+      </button>
+      <span>{{ catalogPage }} / {{ catalogPages }}</span>
+      <button
+        type="button"
+        class="secondary"
+        :disabled="busy || catalogPage >= catalogPages"
+        @click="changeCatalogPage(catalogPage + 1)"
+      >
+        {{ t("nextPage") }}
+      </button>
+    </div>
     <form class="actions" @submit.prevent="load">
       <input
         v-model="search"

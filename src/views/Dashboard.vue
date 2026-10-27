@@ -1,7 +1,6 @@
 <script setup>
   import { onMounted, ref, reactive, computed } from "vue";
   import request from "../api/request";
-  import { getCatalog } from "../api/lessons";
   import { t } from "../i18n";
   import { useTask } from "../composables/useTask";
   import PageState from "../components/PageState.vue";

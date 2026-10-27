@@ -1,6 +1,6 @@
 <script setup>
   import { onMounted, ref } from "vue";
-  import { getCatalog, deleteSystem } from "../api/lessons";
+  import { getSystems, deleteSystem } from "../api/lessons";
   import { t } from "../i18n";
   import request from "../api/request";
   import { useTask } from "../composables/useTask";
@@ -16,7 +16,7 @@
   // 加载专业列表
   async function load() {
     await run(async () => {
-      systems.value = await getCatalog();
+      systems.value = await getSystems();
     });
   }
 
@@ -38,7 +38,7 @@
       );
 
       name.value = "";
-      systems.value = await getCatalog();
+      systems.value = await getSystems();
 
       notify("saved", "success");
     });
@@ -59,7 +59,7 @@
         await deleteSystem(system.system_id);
 
         // 删除成功后刷新列表
-        systems.value = await getCatalog();
+        systems.value = await getSystems();
 
         notify("deleted", "success");
       });

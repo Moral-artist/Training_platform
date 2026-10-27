@@ -10,7 +10,7 @@
   } from "vue";
   import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
   import request from "../api/request";
-  import { getCatalog, getLesson } from "../api/lessons";
+  import { getSystems, getLesson } from "../api/lessons";
   import { fingerprintFile, transferFile } from "../api/upload";
   import { auth } from "../stores/auth";
   import { t } from "../i18n";
@@ -63,7 +63,7 @@
   watch([form, upload], persist, { deep: true });
   async function load() {
     await run(async () => {
-      systems.value = await getCatalog();
+      systems.value = await getSystems();
       const { data: limits } = await request.get("/api/uploads/config");
       maxUploadBytes.value = limits.max_upload_bytes || maxUploadBytes.value;
       if (editing.value) {

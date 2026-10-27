@@ -89,11 +89,34 @@ request.defaults.adapter = async (config) => {
   } else if (config.url === "/api/auth/logout") {
     logged = false;
     data = {};
-  } else if (config.url === "/api/lessons/catalog")
-    data = catalog.map((s) => ({
-      ...s,
-      lessons: s.lessons.map((l) => ({ ...l, can_access: logged })),
+  } else if (config.url === "/api/lessons/systems") {
+    data = catalog.map(({ system_id, system_name }) => ({
+      system_id,
+      system_name,
     }));
+  } else if (config.url?.includes("/api/lessons/majors/")) {
+    const systemId = Number(config.url.split("/")[4]);
+    const system = catalog.find((item) => item.system_id === systemId);
+    const lessons = (system?.lessons || []).map((lesson) => ({
+      ...lesson,
+      can_access: logged,
+    }));
+    data = {
+      lessonlist: lessons,
+      total_lessons: lessons.length,
+      total_pages: lessons.length ? 1 : 0,
+      current_page: 1,
+    };
+  } else if (config.url === "/api/lessons/catalog") {
+    const items = catalog
+      .map((s) => ({
+        ...s,
+        lessons: s.lessons.map((l) => ({ ...l, can_access: logged })),
+      }))
+      .filter((s) => s.lessons.length);
+    const total = items.reduce((count, system) => count + system.lessons.length, 0);
+    data = { items, page: 1, limit: 20, total, total_pages: total ? 1 : 0 };
+  }
   else if (config.url.endsWith("/detail"))
     data = {
       lesson_id: 1,

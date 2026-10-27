@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { auth, loadUser, canUpload, isAdmin } from "../stores/auth";
-import CreatePlan from "../views/CreatePlan.vue";
 import { notify } from "../stores/notices";
 const view = (name) => () => import(`../views/${name}.vue`);
 const routes = [
