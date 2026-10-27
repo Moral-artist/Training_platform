@@ -87,3 +87,9 @@ Dockerfile*
 docker-compose*.yml
 docker-compose*.yaml
 .dockerignore
+
+# ============================
+# 11. 仅限管理员手工使用的数据库恢复文件
+# ============================
+database_recovery/
+tools/db_setup.py

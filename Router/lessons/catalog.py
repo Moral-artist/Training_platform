@@ -1,5 +1,6 @@
 """首页只公开课程名称、状态和访问标记，不公开简介/视频对象/播放 URL。"""
 
+import math
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
@@ -25,40 +26,69 @@ router = APIRouter(prefix="/lessons", tags=["catalog and management"])
 
 
 @router.get("/catalog")
-def catalog(db: Session = Depends(get_db), account=Depends(optional_account)):
-    systems = db.scalars(select(Systems).order_by(Systems.id)).all()
+def catalog(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    account=Depends(optional_account),
+):
+    total = db.scalar(
+        select(func.count())
+        .select_from(SystemLesson)
+        .join(Lessons, Lessons.id == SystemLesson.lesson_id)
+        .where(Lessons.deleted_at.is_(None))
+    ) or 0
     rows = db.execute(
-        select(SystemLesson.system_id, Lessons, VideoAsset.status)
+        select(
+            SystemLesson.system_id,
+            Systems.system_name,
+            Lessons,
+            VideoAsset.status,
+        )
+        .join(Systems, Systems.id == SystemLesson.system_id)
         .join(Lessons, Lessons.id == SystemLesson.lesson_id)
         .outerjoin(VideoAsset, VideoAsset.id == Lessons.video_asset_id)
         .where(Lessons.deleted_at.is_(None))
         .order_by(Lessons.id)
+        .offset((page - 1) * limit)
+        .limit(limit)
     ).all()
-    # 批量取得权限集合，避免课程数增加时出现 N+1 查询。
+
+    lesson_ids = [lesson.id for _, _, lesson, _ in rows]
+    asset_ids = [
+        lesson.video_asset_id for _, _, lesson, _ in rows if lesson.video_asset_id
+    ]
+    # 只计算当前页的授权和资产归属，避免课程数增加时全表加载。
     grants = (
         set(
             db.scalars(
                 select(LessonAccess.lesson_id).where(
-                    LessonAccess.account_id == account["account_id"]
+                    LessonAccess.account_id == account["account_id"],
+                    LessonAccess.lesson_id.in_(lesson_ids),
                 )
             ).all()
         )
-        if account
+        if account and lesson_ids
         else set()
     )
     assets = (
         set(
             db.scalars(
                 select(VideoAsset.id).where(
-                    VideoAsset.created_by == account["account_id"]
+                    VideoAsset.created_by == account["account_id"],
+                    VideoAsset.id.in_(asset_ids),
                 )
             ).all()
         )
-        if account
+        if account and asset_ids
         else set()
     )
-    grouped = {s.id: [] for s in systems}
-    for sid, lesson, status in rows:
+    grouped = {}
+    for sid, system_name, lesson, status in rows:
+        system = grouped.setdefault(
+            sid,
+            {"system_id": sid, "system_name": system_name, "lessons": []},
+        )
         allowed = bool(
             account
             and (
@@ -68,7 +98,7 @@ def catalog(db: Session = Depends(get_db), account=Depends(optional_account)):
                 or lesson.id in grants
             )
         )
-        grouped[sid].append(
+        system["lessons"].append(
             {
                 "lesson_id": lesson.id,
                 "lesson_name": lesson.lesson_name,
@@ -81,10 +111,13 @@ def catalog(db: Session = Depends(get_db), account=Depends(optional_account)):
                 ),
             }
         )
-    return [
-        {"system_id": s.id, "system_name": s.system_name, "lessons": grouped[s.id]}
-        for s in systems
-    ]
+    return {
+        "items": list(grouped.values()),
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": math.ceil(total / limit) if total else 0,
+    }
 
 
 def managed(db, account, lesson_id, lock=False):

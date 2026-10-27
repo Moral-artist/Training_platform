@@ -48,98 +48,98 @@ def get_owned_asset(
 
     return asset
 
-
-@router.post("/upload_token")
-async def upload_token(
-    uploadvideo: UploadVideo,
-    db: Session = Depends(get_db),
-    account: dict = Depends(permission_auth),
-):
-    require_video_manager(account)
-
-    await rate_limit(account["account_id"], "upload", 10, 600)
-    suffix = Path(uploadvideo.filename).suffix.lower()
-    if ALLOWED_TYPES.get(suffix) != uploadvideo.content_type:
-        raise HTTPException(status_code=400, detail="Unsupported video type")
-
-    if not 0 < uploadvideo.size <= MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=400, detail="Invalid video size")
-
-    asset_id = uuid4()
-    source_key = f"videos/source/{asset_id}{suffix}"
-
-    asset = VideoAsset(
-        id=asset_id,
-        source_object_key=source_key,
-        status="pending_upload",
-        declared_size=uploadvideo.size,
-        content_type=uploadvideo.content_type,
-        created_by=account["account_id"],
-    )
-    db.add(asset)
-    db.commit()
-
-    try:
-        upload_url = r2.generate_presigned_url(
-            ClientMethod="put_object",
-            Params={
-                "Bucket": R2_BUCKET,
-                "Key": source_key,
-                "ContentType": uploadvideo.content_type,
-            },
-            ExpiresIn=300,
-        )
-    except Exception:
-        db.delete(asset)
-        db.commit()
-        raise HTTPException(status_code=502, detail="Cannot create upload URL")
-
-    return {
-        "asset_id": str(asset_id),
-        "upload_url": upload_url,
-        "expires_in": 300,
-    }
-
-
-@router.post("/{asset_id}/complete")
-def complete_upload(
-    asset_id: UUID,
-    db: Session = Depends(get_db),
-    account: dict = Depends(permission_auth),
-):
-    require_video_manager(account)
-    asset = get_owned_asset(asset_id, db, account, lock=True)
-
-    if asset.status in {"uploaded", "processing", "ready"}:
-        return {"asset_id": str(asset.id), "status": asset.status}
-
-    if asset.status != "pending_upload":
-        raise HTTPException(status_code=409, detail="Invalid video status")
-
-    try:
-        obj = r2.head_object(
-            Bucket=R2_BUCKET,
-            Key=asset.source_object_key,
-        )
-    except ClientError:
-        raise HTTPException(status_code=400, detail="Upload not found in R2")
-
-    if not 0 < obj["ContentLength"] <= MAX_VIDEO_SIZE:
-        raise HTTPException(status_code=400, detail="Invalid uploaded file size")
-
-    if asset.declared_size is not None and obj["ContentLength"] != asset.declared_size:
-        raise HTTPException(400, "Uploaded size does not match declared size")
-
-    expected_type = ALLOWED_TYPES.get(Path(asset.source_object_key).suffix.lower())
-    if obj.get("ContentType") != expected_type:
-        raise HTTPException(status_code=400, detail="Invalid uploaded file type")
-
-    asset.status = "uploaded"
-    asset.updated_at = datetime.now(timezone.utc)
-    db.commit()
-
-    return {"asset_id": str(asset.id), "status": asset.status}
-
+#
+# @router.post("/upload_token")
+# async def upload_token(
+#     uploadvideo: UploadVideo,
+#     db: Session = Depends(get_db),
+#     account: dict = Depends(permission_auth),
+# ):
+#     require_video_manager(account)
+#
+#     await rate_limit(account["account_id"], "upload", 10, 600)
+#     suffix = Path(uploadvideo.filename).suffix.lower()
+#     if ALLOWED_TYPES.get(suffix) != uploadvideo.content_type:
+#         raise HTTPException(status_code=400, detail="Unsupported video type")
+#
+#     if not 0 < uploadvideo.size <= MAX_VIDEO_SIZE:
+#         raise HTTPException(status_code=400, detail="Invalid video size")
+#
+#     asset_id = uuid4()
+#     source_key = f"videos/source/{asset_id}{suffix}"
+#
+#     asset = VideoAsset(
+#         id=asset_id,
+#         source_object_key=source_key,
+#         status="pending_upload",
+#         declared_size=uploadvideo.size,
+#         content_type=uploadvideo.content_type,
+#         created_by=account["account_id"],
+#     )
+#     db.add(asset)
+#     db.commit()
+#
+#     try:
+#         upload_url = r2.generate_presigned_url(
+#             ClientMethod="put_object",
+#             Params={
+#                 "Bucket": R2_BUCKET,
+#                 "Key": source_key,
+#                 "ContentType": uploadvideo.content_type,
+#             },
+#             ExpiresIn=300,
+#         )
+#     except Exception:
+#         db.delete(asset)
+#         db.commit()
+#         raise HTTPException(status_code=502, detail="Cannot create upload URL")
+#
+#     return {
+#         "asset_id": str(asset_id),
+#         "upload_url": upload_url,
+#         "expires_in": 300,
+#     }
+#
+#
+# @router.post("/{asset_id}/complete")
+# def complete_upload(
+#     asset_id: UUID,
+#     db: Session = Depends(get_db),
+#     account: dict = Depends(permission_auth),
+# ):
+#     require_video_manager(account)
+#     asset = get_owned_asset(asset_id, db, account, lock=True)
+#
+#     if asset.status in {"uploaded", "processing", "ready"}:
+#         return {"asset_id": str(asset.id), "status": asset.status}
+#
+#     if asset.status != "pending_upload":
+#         raise HTTPException(status_code=409, detail="Invalid video status")
+#
+#     try:
+#         obj = r2.head_object(
+#             Bucket=R2_BUCKET,
+#             Key=asset.source_object_key,
+#         )
+#     except ClientError:
+#         raise HTTPException(status_code=400, detail="Upload not found in R2")
+#
+#     if not 0 < obj["ContentLength"] <= MAX_VIDEO_SIZE:
+#         raise HTTPException(status_code=400, detail="Invalid uploaded file size")
+#
+#     if asset.declared_size is not None and obj["ContentLength"] != asset.declared_size:
+#         raise HTTPException(400, "Uploaded size does not match declared size")
+#
+#     expected_type = ALLOWED_TYPES.get(Path(asset.source_object_key).suffix.lower())
+#     if obj.get("ContentType") != expected_type:
+#         raise HTTPException(status_code=400, detail="Invalid uploaded file type")
+#
+#     asset.status = "uploaded"
+#     asset.updated_at = datetime.now(timezone.utc)
+#     db.commit()
+#
+#     return {"asset_id": str(asset.id), "status": asset.status}
+#
 
 @router.get("/{asset_id}/status")
 def video_status(

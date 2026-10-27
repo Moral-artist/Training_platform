@@ -12,6 +12,7 @@ from data_model.data_model import (
     VideoAsset,
     Lessons,
     LessonAccess,
+    SystemLesson,
 )
 from main import app
 from tools.permission_auth import optional_account, resolve_account
@@ -37,8 +38,11 @@ def test_public_catalog_lists_all_systems_without_private_data(context):
     db.commit()
     result = client.get("/api/lessons/catalog")
     assert result.status_code == 200
-    assert len(result.json()) == 2 and result.json()[1]["lessons"] == []
-    lesson = result.json()[0]["lessons"][0]
+    data = result.json()
+    assert data["page"] == 1 and data["limit"] == 20
+    assert data["total"] == 1 and data["total_pages"] == 1
+    assert len(client.get("/api/lessons/systems").json()) == 2
+    lesson = data["items"][0]["lessons"][0]
     assert lesson["can_access"] is False and lesson["access_reason"] == "login_required"
     assert set(lesson) == {
         "lesson_id",
@@ -58,14 +62,43 @@ def test_logged_in_catalog_flags_grants_without_hiding_other_courses(context):
     client, db, identity = context
     expose_identity(db, identity)
     assert (
-        client.get("/api/lessons/catalog").json()[0]["lessons"][0]["access_reason"]
+        client.get("/api/lessons/catalog").json()["items"][0]["lessons"][0]["access_reason"]
         == "grant_required"
     )
     db.add(LessonAccess(account_id=STUDENT, lesson_id=1, granted_by=ADMIN))
     db.commit()
     assert (
-        client.get("/api/lessons/catalog").json()[0]["lessons"][0]["can_access"] is True
+        client.get("/api/lessons/catalog").json()["items"][0]["lessons"][0]["can_access"] is True
     )
+
+
+def test_catalog_uses_database_pagination(context):
+    client, db, _ = context
+    for lesson_id in range(2, 27):
+        db.add(
+            Lessons(
+                id=lesson_id,
+                lesson_name=f"Page lesson {lesson_id}",
+                description="pagination",
+                created_by=ADMIN,
+            )
+        )
+        db.add(SystemLesson(system_id=1, lesson_id=lesson_id))
+    db.commit()
+
+    first = client.get("/api/lessons/catalog?page=1&limit=10")
+    third = client.get("/api/lessons/catalog?page=3&limit=10")
+    assert first.status_code == third.status_code == 200
+    assert first.json()["total"] == 26
+    assert first.json()["total_pages"] == 3
+    assert len(first.json()["items"][0]["lessons"]) == 10
+    assert len(third.json()["items"][0]["lessons"]) == 6
+    assert (
+        first.json()["items"][0]["lessons"][0]["lesson_id"]
+        != third.json()["items"][0]["lessons"][0]["lesson_id"]
+    )
+    assert client.get("/api/lessons/catalog?page=0&limit=10").status_code == 422
+    assert client.get("/api/lessons/catalog?page=1&limit=101").status_code == 422
 
 
 def test_profile_returns_context_and_cannot_elevate_role(context):
@@ -190,7 +223,8 @@ def test_course_edit_version_and_delete_permissions(context):
     assert client.delete("/api/lessons/1?revision=2", headers=CSRF).status_code == 200
     assert client.get("/api/lessons/1/detail").status_code == 404
     assert client.post("/api/lessons/1/play", headers=CSRF).status_code == 404
-    assert client.get("/api/lessons/catalog").json()[0]["lessons"] == []
+    catalog = client.get("/api/lessons/catalog").json()
+    assert catalog["items"] == [] and catalog["total"] == 0
     assert db.get(Lessons, 1) is not None
 
 

@@ -94,43 +94,43 @@ async def edit_profile(
         "message": "User updated successfully",
     }
 
-
-@router.get("/my_lessons")
-async def my_lessons(
-    session: dict = Depends(get_current_session),
-    db: Session = Depends(get_db),
-):
-    try:
-        my_lessons = db.execute(
-            select(
-                CustomedPlan.plan_name.label("plan_name"),
-                Lessons.id.label("lesson_id"),
-                Lessons.lesson_name.label("lesson_name"),
-            )
-            .select_from(CustomedPlan)
-            .join(PlanLesson, PlanLesson.plan_id == CustomedPlan.id)
-            .join(Lessons, Lessons.id == PlanLesson.lesson_id)
-            .where(
-                CustomedPlan.user_id == UUID(session["user_id"]),
-                Lessons.deleted_at.is_(None),
-            )
-        ).all()
-
-        grouped = {}
-        for my_lesson in my_lessons:
-            if my_lesson.plan_name not in grouped:
-                grouped[my_lesson.plan_name] = []
-            grouped[my_lesson.plan_name].append(
-                {
-                    "lesson_id": my_lesson.lesson_id,
-                    "lesson_name": my_lesson.lesson_name,
-                }
-            )
-        return [
-            {"plan_name": plan_name, "lesson": lesson}
-            for plan_name, lesson in grouped.items()
-        ]
-
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Updating information failed")
+#
+# @router.get("/my_lessons")
+# async def my_lessons(
+#     session: dict = Depends(get_current_session),
+#     db: Session = Depends(get_db),
+# ):
+#     try:
+#         my_lessons = db.execute(
+#             select(
+#                 CustomedPlan.plan_name.label("plan_name"),
+#                 Lessons.id.label("lesson_id"),
+#                 Lessons.lesson_name.label("lesson_name"),
+#             )
+#             .select_from(CustomedPlan)
+#             .join(PlanLesson, PlanLesson.plan_id == CustomedPlan.id)
+#             .join(Lessons, Lessons.id == PlanLesson.lesson_id)
+#             .where(
+#                 CustomedPlan.user_id == UUID(session["user_id"]),
+#                 Lessons.deleted_at.is_(None),
+#             )
+#         ).all()
+#
+#         grouped = {}
+#         for my_lesson in my_lessons:
+#             if my_lesson.plan_name not in grouped:
+#                 grouped[my_lesson.plan_name] = []
+#             grouped[my_lesson.plan_name].append(
+#                 {
+#                     "lesson_id": my_lesson.lesson_id,
+#                     "lesson_name": my_lesson.lesson_name,
+#                 }
+#             )
+#         return [
+#             {"plan_name": plan_name, "lesson": lesson}
+#             for plan_name, lesson in grouped.items()
+#         ]
+#
+#     except IntegrityError:
+#         db.rollback()
+#         raise HTTPException(status_code=409, detail="Updating information failed")

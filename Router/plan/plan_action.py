@@ -194,7 +194,7 @@ def add_custom(
     data: AddCustomPlan, db: Session = Depends(get_db), account=Depends(permission_auth)
 ):
     if MEMBERSHIP_LEVEL[account['membership_level']]<MEMBERSHIP_LEVEL['pro']:
-        raise HTTPException(409, "You dont have access, You need to upgrade to PRO")
+        raise HTTPException(403, "You dont have access, You need to upgrade to PRO")
     # validate_items(db, account, data.lesson_list)
     return create_personal(db, account, data.plan_name, data.lesson_list)
 

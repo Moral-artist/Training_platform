@@ -1,115 +1,143 @@
-"""Explicit PostgreSQL setup; check-only unless --apply is supplied."""
+"""Manually rebuild an empty PostgreSQL schema from the current data model.
+
+The application and transcode worker never import this module. Production Docker
+builds exclude it, so database recovery cannot run as part of service startup.
+"""
+
+from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 from data_model.config import settings
 from data_model.core_database import Base
-import data_model.data_model  # register every table
-
-ROOT = Path(__file__).resolve().parents[1]
+import data_model.data_model  # noqa: F401 - register every mapped table
 
 
-def migrate(connection):
-    inspector = inspect(connection)
-    required = {
-        "accounts": {"id", "user_id", "email", "password", "role_id", "token"},
-        "lessons": {"id", "lesson_video_url", "created_by"},
-        "users": {"id"},
-        "roles": {"id"},
-    }
-    if "video_assets" in inspector.get_table_names():
-        required["video_assets"] = {
-            "id",
-            "source_object_key",
-            "master_playlist_key",
-            "status",
-            "error_message",
-            "created_by",
-            "created_at",
-            "updated_at",
-        }
-    if "lesson_access" in inspector.get_table_names():
-        required["lesson_access"] = {
-            "account_id",
-            "lesson_id",
-            "granted_by",
-            "created_at",
-        }
-    for table, names in required.items():
-        if not inspector.has_table(table):
-            raise ValueError(
-                f"Missing base table {table}; use init for an empty database"
-            )
-        actual = {column["name"] for column in inspector.get_columns(table)}
-        if names - actual:
-            raise ValueError(
-                f"Schema mismatch in {table}: missing {sorted(names - actual)}"
-            )
-    connection.exec_driver_sql((ROOT / "migrations/001_video_upgrade.sql").read_text())
-    connection.exec_driver_sql(
-        (ROOT / "migrations/002_platform_upgrade.sql").read_text()
-    )
-    # 在同一事务中移除旧等级列；失败时回滚整个升级。
-    connection.exec_driver_sql(
-        (ROOT / "migrations/003_remove_membership.sql").read_text()
-    )
-    # 原备份可能缺少考试表；只创建缺失表，不重建或清空已有业务数据。
-    Base.metadata.create_all(connection)
+CONFIRMATION_TEXT = "RESTORE_EMPTY_DATABASE"
+PRODUCTION_ENVIRONMENTS = {"prod", "production"}
 
 
-def main():
+def expected_table_names() -> set[str]:
+    """Return the tables defined by the current data model."""
+
+    return set(Base.metadata.tables)
+
+
+def require_safe_request(
+    *,
+    apply: bool,
+    confirmation: str | None,
+    environment: str,
+    allow_production_recovery: bool,
+) -> None:
+    """Reject implicit execution and unapproved production recovery."""
+
+    if not apply:
+        return
+    if confirmation != CONFIRMATION_TEXT:
+        raise ValueError(
+            f"Recovery requires --confirm {CONFIRMATION_TEXT}; no changes were made"
+        )
+    if (
+        environment.strip().lower() in PRODUCTION_ENVIRONMENTS
+        and not allow_production_recovery
+    ):
+        raise ValueError(
+            "Production recovery is blocked. Run from an administrator checkout "
+            "and add --allow-production-recovery after confirming the target and backup"
+        )
+
+
+def require_empty_database(existing_tables: set[str]) -> None:
+    """Never modify, migrate, truncate, or merge an existing database."""
+
+    if existing_tables:
+        names = ", ".join(sorted(existing_tables))
+        raise ValueError(
+            f"Target database is not empty ({names}); no changes were made"
+        )
+
+
+def restore_empty_database(connection) -> list[str]:
+    """Create the current model schema in an empty PostgreSQL database."""
+
+    existing = set(inspect(connection).get_table_names(schema="public"))
+    require_empty_database(existing)
+
+    connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+    Base.metadata.create_all(connection, checkfirst=False)
+
+    expected = expected_table_names()
+    created = set(inspect(connection).get_table_names(schema="public"))
+    missing = expected - created
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise RuntimeError(f"Recovery verification failed; missing tables: {names}")
+    return sorted(expected)
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("init", "migrate"))
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Apply to DATABASE_URL; default only prints target",
+        help="Create the schema. Without this flag the command is check-only.",
+    )
+    parser.add_argument(
+        "--confirm",
+        metavar=CONFIRMATION_TEXT,
+        help="Required exact confirmation text when --apply is used.",
+    )
+    parser.add_argument(
+        "--allow-production-recovery",
+        action="store_true",
+        help="Additional manual override required when IS_PRODUCTION is production.",
     )
     args = parser.parse_args()
+
+    try:
+        require_safe_request(
+            apply=args.apply,
+            confirmation=args.confirm,
+            environment=settings.IS_PRODUCTION,
+            allow_production_recovery=args.allow_production_recovery,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+
     url = make_url(settings.DATABASE_URL)
     if url.get_backend_name() != "postgresql":
-        parser.error("This setup tool requires PostgreSQL")
-    print(f"Target: host={url.host}, port={url.port or 5432}, database={url.database}")
+        parser.error("Database recovery requires PostgreSQL")
+
+    target = f"host={url.host}, port={url.port or 5432}, database={url.database}"
+    print(f"Target: {target}")
+    print(f"Model tables: {', '.join(sorted(expected_table_names()))}")
     if not args.apply:
         print(
-            "Check-only: no changes. init creates an empty DB schema; migrate upgrades existing tables."
+            "Check-only: no connection was opened and no changes were made. "
+            f"To restore an empty database, add --apply --confirm {CONFIRMATION_TEXT}."
         )
-        if args.action == "migrate":
-            print(
-                "This version removes accounts.membership_level and its stored values."
-            )
-        print("Confirm the target and back up any existing database, then add --apply.")
         return
-    engine = create_engine(url)
+
+    engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
     try:
         with engine.begin() as connection:
-            if args.action == "init":
-                if inspect(connection).get_table_names():
-                    raise ValueError(
-                        "Database already has tables; init will not overwrite them"
-                    )
-                connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-                Base.metadata.create_all(connection)
-            else:
-                migrate(connection)
-        print(
-            f"{args.action} completed; no account passwords or Cloudflare credentials were changed."
-        )
+            tables = restore_empty_database(connection)
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
     except Exception as error:
-        # Driver exception text may contain connection credentials. Emit only the class.
-        if isinstance(error, ValueError):
-            print(str(error))
-        else:
-            print(
-                f"Database operation failed ({type(error).__name__}); transaction rolled back."
-            )
-        raise SystemExit(1)
+        # Driver exception messages can contain credentials or server details.
+        raise SystemExit(
+            f"Database recovery failed ({type(error).__name__}); transaction rolled back"
+        ) from None
     finally:
         engine.dispose()
+
+    print(f"Recovery completed and verified: {len(tables)} tables created.")
+    print("No roles, accounts, course data, or object-storage files were restored.")
 
 
 if __name__ == "__main__":
